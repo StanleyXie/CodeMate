@@ -1,0 +1,17 @@
+[package]
+name = "codemate-embeddings"
+description = "Embedding generation for CodeMate"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+codemate-core.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+# Embeddings - using fastembed
+fastembed = "5"

@@ -1,4 +1,4 @@
-# SCUE Technical Architecture & Specification
+# CodeMate Technical Architecture & Specification
 
 ## Development Blueprint v0.1
 
@@ -86,12 +86,12 @@
 
 ## 2. Module Specifications
 
-### 2.1 Module: `scue-core`
+### 2.1 Module: `codemate-core`
 
 **Purpose**: Core types, traits, and utilities shared across all modules.
 
 ```rust
-// crate: scue-core
+// crate: codemate-core
 
 /// Content hash (SHA-256, 32 bytes)
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -165,12 +165,12 @@ pub struct SearchResult {
 
 ---
 
-### 2.2 Module: `scue-parser`
+### 2.2 Module: `codemate-parser`
 
 **Purpose**: AST parsing, chunk extraction, and graph edge detection.
 
 ```rust
-// crate: scue-parser
+// crate: codemate-parser
 
 pub struct ParserConfig {
     pub max_chunk_lines: usize,      // Default: 100
@@ -242,7 +242,7 @@ pub struct JavaScriptExtractor;
 pub struct GoExtractor;
 ```
 
-**Dependencies**: tree-sitter + language grammars, scue-core
+**Dependencies**: tree-sitter + language grammars, codemate-core
 
 **Open Questions**:
 - [ ] How to handle macros in Rust (they can expand to arbitrary code)?
@@ -251,12 +251,12 @@ pub struct GoExtractor;
 
 ---
 
-### 2.3 Module: `scue-git`
+### 2.3 Module: `codemate-git`
 
 **Purpose**: Git repository traversal, blame integration, and history indexing.
 
 ```rust
-// crate: scue-git
+// crate: codemate-git
 
 pub struct GitIndexConfig {
     pub branches: Vec<BranchPattern>,
@@ -311,7 +311,7 @@ pub struct IncrementalUpdate {
 }
 ```
 
-**Dependencies**: git2 (libgit2), glob, scue-core
+**Dependencies**: git2 (libgit2), glob, codemate-core
 
 **Open Questions**:
 - [ ] How to handle very large repositories (>100K commits)?
@@ -321,12 +321,12 @@ pub struct IncrementalUpdate {
 
 ---
 
-### 2.4 Module: `scue-storage`
+### 2.4 Module: `codemate-storage`
 
 **Purpose**: Content-addressable storage, vector index, and location tracking.
 
 ```rust
-// crate: scue-storage
+// crate: codemate-storage
 
 pub struct Storage {
     conn: Connection,
@@ -385,7 +385,7 @@ impl Storage {
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Dependencies**: rusqlite, sqlite-vec, serde_json, scue-core
+**Dependencies**: rusqlite, sqlite-vec, serde_json, codemate-core
 
 **Open Questions**:
 - [ ] sqlite-vec vs. alternatives (usearch, faiss)?
@@ -394,12 +394,12 @@ impl Storage {
 
 ---
 
-### 2.5 Module: `scue-embed`
+### 2.5 Module: `codemate-embed`
 
 **Purpose**: Embedding generation using ONNX Runtime.
 
 ```rust
-// crate: scue-embed
+// crate: codemate-embed
 
 #[derive(Clone, Copy)]
 pub enum Model {
@@ -440,7 +440,7 @@ impl CachedEmbeddingService {
 }
 ```
 
-**Dependencies**: fastembed, scue-core, scue-storage
+**Dependencies**: fastembed, codemate-core, codemate-storage
 
 **Open Questions**:
 - [ ] Which embedding model provides best code search quality?
@@ -449,12 +449,12 @@ impl CachedEmbeddingService {
 
 ---
 
-### 2.6 Module: `scue-search`
+### 2.6 Module: `codemate-search`
 
 **Purpose**: Query processing, multi-modal search, and result fusion.
 
 ```rust
-// crate: scue-search
+// crate: codemate-search
 
 pub struct SearchConfig {
     pub default_limit: usize,           // Default: 20
@@ -526,16 +526,16 @@ impl Reranker {
 }
 ```
 
-**Dependencies**: scue-core, scue-storage, scue-embed, reqwest, futures
+**Dependencies**: codemate-core, codemate-storage, codemate-embed, reqwest, futures
 
 ---
 
-### 2.7 Module: `scue-graph`
+### 2.7 Module: `codemate-graph`
 
 **Purpose**: Code relationship graph queries.
 
 ```rust
-// crate: scue-graph
+// crate: codemate-graph
 
 pub struct GraphEngine {
     storage: Arc<Storage>,
@@ -558,10 +558,10 @@ impl GraphEngine {
 ### 3.1 CLI Interface
 
 ```
-scue - Semantic Code Understanding Engine
+codemate - Semantic Code Understanding Engine
 
 USAGE:
-    scue <COMMAND>
+    codemate <COMMAND>
 
 COMMANDS:
     index       Index a git repository
@@ -571,11 +571,11 @@ COMMANDS:
     status      Show index status
 
 EXAMPLES:
-    scue index .
-    scue search "authentication middleware"
-    scue search "db conn" author:alice after:2024-01-01
-    scue graph callers "authenticate"
-    scue history "UserService.create"
+    codemate index .
+    codemate search "authentication middleware"
+    codemate search "db conn" author:alice after:2024-01-01
+    codemate graph callers "authenticate"
+    codemate history "UserService.create"
 ```
 
 ### 3.2 MCP Server Tools
@@ -583,11 +583,11 @@ EXAMPLES:
 ```json
 {
   "tools": [
-    { "name": "scue_search", "description": "Semantic code search" },
-    { "name": "scue_callers", "description": "Find callers of a function" },
-    { "name": "scue_deps", "description": "Find dependencies of a file" },
-    { "name": "scue_history", "description": "View symbol history" },
-    { "name": "scue_blame", "description": "Find who wrote code" }
+    { "name": "codemate_search", "description": "Semantic code search" },
+    { "name": "codemate_callers", "description": "Find callers of a function" },
+    { "name": "codemate_deps", "description": "Find dependencies of a file" },
+    { "name": "codemate_history", "description": "View symbol history" },
+    { "name": "codemate_blame", "description": "Find who wrote code" }
   ]
 }
 ```
@@ -692,28 +692,28 @@ For each item at RRF position i:
 
 ```
                                  ┌─────────────────┐
-                                 │    scue-cli     │
+                                 │    codemate-cli     │
                                  └────────┬────────┘
                     ┌─────────────────────┼─────────────────────┐
                     ▼                     ▼                     ▼
            ┌───────────────┐    ┌───────────────┐    ┌───────────────┐
-           │  scue-server  │    │  scue-search  │    │   scue-mcp    │
+           │  codemate-server  │    │  codemate-search  │    │   codemate-mcp    │
            └───────┬───────┘    └───────┬───────┘    └───────┬───────┘
                    └────────────────────┼────────────────────┘
                     ┌───────────────────┴───────────────────┐
                     ▼                                       ▼
            ┌───────────────┐                      ┌───────────────┐
-           │  scue-embed   │                      │  scue-graph   │
+           │  codemate-embed   │                      │  codemate-graph   │
            └───────┬───────┘                      └───────┬───────┘
                    └───────────────────┬───────────────────┘
                                        ▼
                               ┌───────────────┐
-                              │ scue-storage  │
+                              │ codemate-storage  │
                               └───────┬───────┘
            ┌──────────────────────────┼──────────────────────────┐
            ▼                          ▼                          ▼
   ┌───────────────┐          ┌───────────────┐          ┌───────────────┐
-  │  scue-parser  │          │   scue-git    │          │  scue-core    │
+  │  codemate-parser  │          │   codemate-git    │          │  codemate-core    │
   └───────────────┘          └───────────────┘          └───────────────┘
 ```
 
@@ -722,19 +722,19 @@ For each item at RRF position i:
 ## 8. File Structure
 
 ```
-scue/
+codemate/
 ├── Cargo.toml                 # Workspace manifest
 ├── crates/
-│   ├── scue-core/            # Types, traits, utilities
-│   ├── scue-parser/          # AST parsing, chunking
-│   ├── scue-git/             # Git operations
-│   ├── scue-storage/         # Database, indexes
-│   ├── scue-embed/           # Embeddings
-│   ├── scue-search/          # Search engine
-│   ├── scue-graph/           # Graph queries
-│   ├── scue-server/          # HTTP API
-│   ├── scue-mcp/             # MCP server
-│   └── scue-cli/             # CLI binary
+│   ├── codemate-core/            # Types, traits, utilities
+│   ├── codemate-parser/          # AST parsing, chunking
+│   ├── codemate-git/             # Git operations
+│   ├── codemate-storage/         # Database, indexes
+│   ├── codemate-embed/           # Embeddings
+│   ├── codemate-search/          # Search engine
+│   ├── codemate-graph/           # Graph queries
+│   ├── codemate-server/          # HTTP API
+│   ├── codemate-mcp/             # MCP server
+│   └── codemate-cli/             # CLI binary
 ├── tests/integration/
 └── benches/
 ```

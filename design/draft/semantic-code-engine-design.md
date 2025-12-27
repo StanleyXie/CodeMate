@@ -10,11 +10,11 @@
 
 ## 1. Executive Summary
 
-The Semantic Code Understanding Engine (SCUE) is a next-generation code intelligence platform that combines AST-aware code analysis, git-native temporal understanding, and multi-modal semantic search. Unlike existing tools (osgrep, demongrep, qmd), SCUE treats git history as a first-class citizen and implements a content-addressable storage model that enables unprecedented code archaeology capabilities.
+The Semantic Code Understanding Engine (CodeMate) is a next-generation code intelligence platform that combines AST-aware code analysis, git-native temporal understanding, and multi-modal semantic search. Unlike existing tools (osgrep, demongrep, qmd), CodeMate treats git history as a first-class citizen and implements a content-addressable storage model that enables unprecedented code archaeology capabilities.
 
 ### Key Differentiators
 
-| Capability | osgrep | demongrep | qmd | SCUE |
+| Capability | osgrep | demongrep | qmd | CodeMate |
 |------------|--------|-----------|-----|------|
 | AST-aware chunking | ✅ | ✅ | ❌ | ✅ |
 | Git history search | ❌ | ❌ | ❌ | ✅ |
@@ -54,7 +54,7 @@ Semantic metadata               Commit
 ### 2.3 Git as Source of Truth
 
 - Git objects (blobs, trees, commits) are the canonical content source
-- SCUE indexes git, never replaces it
+- CodeMate indexes git, never replaces it
 - All temporal metadata derived from git history
 - Branch relationships extracted from git graph
 
@@ -136,7 +136,7 @@ Semantic metadata               Commit
 
 ### 4.1 Content-Addressable Store (CAS)
 
-The CAS is the heart of SCUE, providing deduplication and immutable storage.
+The CAS is the heart of CodeMate, providing deduplication and immutable storage.
 
 #### 4.1.1 Chunk Store
 
@@ -685,63 +685,63 @@ Example: Embed AI-generated summaries for semantic search on descriptions.
 
 ```bash
 # Basic semantic search
-scue search "authentication middleware"
+codemate search "authentication middleware"
 
 # Author filter
-scue search "database connection" author:alice@example.com
+codemate search "database connection" author:alice@example.com
 
 # Time range
-scue search "rate limiting" after:2024-01-01 before:2024-06-01
+codemate search "rate limiting" after:2024-01-01 before:2024-06-01
 
 # Branch filter (glob patterns supported)
-scue search "feature flag" in:main,develop,feature/*
+codemate search "feature flag" in:main,develop,feature/*
 
 # Language filter
-scue search "async handler" lang:rust,typescript
+codemate search "async handler" lang:rust,typescript
 
 # Chunk type filter
-scue search "validation" type:function,method
+codemate search "validation" type:function,method
 
 # Path filter (glob patterns)
-scue search "config" path:src/config/**
+codemate search "config" path:src/config/**
 
 # Combined filters
-scue search "authentication" author:alice in:main after:2024-01-01 lang:rust type:function
+codemate search "authentication" author:alice in:main after:2024-01-01 lang:rust type:function
 ```
 
 ### 9.3 Graph Queries
 
 ```bash
 # Find callers
-scue graph callers "authenticate"
+codemate graph callers "authenticate"
 
 # Find callees
-scue graph callees "UserService.create"
+codemate graph callees "UserService.create"
 
 # Find dependencies
-scue graph deps "src/auth/mod.rs"
+codemate graph deps "src/auth/mod.rs"
 
 # Find dependents (reverse deps)
-scue graph rdeps "src/utils/hash.rs"
+codemate graph rdeps "src/utils/hash.rs"
 
 # Find similar code
-scue graph similar "src/handlers/auth.rs:authenticate"
+codemate graph similar "src/handlers/auth.rs:authenticate"
 ```
 
 ### 9.4 Temporal Queries
 
 ```bash
 # Show history of a function
-scue history "authenticate" --since 2024-01-01
+codemate history "authenticate" --since 2024-01-01
 
 # Find when function was added
-scue origin "UserService.validate"
+codemate origin "UserService.validate"
 
 # Find who last modified
-scue blame "src/auth/middleware.rs:45-60"
+codemate blame "src/auth/middleware.rs:45-60"
 
 # Compare across commits
-scue diff "authenticate" --from HEAD~10 --to HEAD
+codemate diff "authenticate" --from HEAD~10 --to HEAD
 ```
 
 ---
@@ -913,7 +913,7 @@ registry.register_model(OllamaModel::new("nomic-embed-text")?);
 ### 13.1 Basic Search
 
 ```bash
-$ scue search "authentication middleware"
+$ codemate search "authentication middleware"
 
 📄 src/middleware/auth.rs:45-89 (main @ abc1234)
    Score: 0.92 | Author: alice@example.com | 2024-03-15
@@ -936,7 +936,7 @@ $ scue search "authentication middleware"
 ### 13.2 Temporal Search
 
 ```bash
-$ scue search "rate limiting" after:2024-01-01 before:2024-03-01
+$ codemate search "rate limiting" after:2024-01-01 before:2024-03-01
 
 Found 3 results in time range 2024-01-01 to 2024-03-01:
 
@@ -953,7 +953,7 @@ Found 3 results in time range 2024-01-01 to 2024-03-01:
 ### 13.3 Cross-Branch Search
 
 ```bash
-$ scue search "feature flag" in:main,develop,feature/*
+$ codemate search "feature flag" in:main,develop,feature/*
 
 Results across 5 branches:
 
@@ -970,7 +970,7 @@ Results across 5 branches:
 ### 13.4 Graph Query
 
 ```bash
-$ scue graph callers "authenticate"
+$ codemate graph callers "authenticate"
 
 Functions that call authenticate():
 
@@ -985,7 +985,7 @@ Total: 18 call sites in 4 files
 ### 13.5 Code Archaeology
 
 ```bash
-$ scue history "authenticate" --since 2024-01-01
+$ codemate history "authenticate" --since 2024-01-01
 
 Timeline for authenticate():
 
@@ -1039,7 +1039,7 @@ Timeline for authenticate():
 ## Appendix B: Configuration File
 
 ```toml
-# ~/.config/scue/config.toml
+# ~/.config/codemate/config.toml
 
 [index]
 # Default branches to index
