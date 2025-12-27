@@ -6,5 +6,5 @@
 mod traits;
 mod sqlite;
 
-pub use traits::{ChunkStore, VectorStore, Embedding, SimilarityResult};
+pub use traits::{ChunkStore, VectorStore, LocationStore, Embedding, SimilarityResult};
 pub use sqlite::SqliteStorage;

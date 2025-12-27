@@ -1,7 +1,8 @@
 //! Index command implementation.
 
 use anyhow::Result;
-use codemate_core::storage::{ChunkStore, SqliteStorage, VectorStore};
+use codemate_core::storage::{ChunkStore, LocationStore, SqliteStorage, VectorStore};
+use codemate_core::ChunkLocation;
 use codemate_embeddings::EmbeddingGenerator;
 use codemate_parser::ChunkExtractor;
 use colored::Colorize;
@@ -9,7 +10,16 @@ use std::path::PathBuf;
 use walkdir::WalkDir;
 
 /// Run the index command.
-pub async fn run(path: PathBuf, database: PathBuf) -> Result<()> {
+pub async fn run(path: PathBuf, database: PathBuf, git_mode: bool, _max_commits: usize) -> Result<()> {
+    if git_mode {
+        run_git_aware(&path, &database).await
+    } else {
+        run_simple(&path, &database).await
+    }
+}
+
+/// Simple indexing (current files only)
+async fn run_simple(path: &PathBuf, database: &PathBuf) -> Result<()> {
     println!("{} Indexing {}", "→".blue(), path.display());
 
     // Create database directory if needed
@@ -18,7 +28,7 @@ pub async fn run(path: PathBuf, database: PathBuf) -> Result<()> {
     }
 
     // Initialize storage
-    let storage = SqliteStorage::new(&database)?;
+    let storage = SqliteStorage::new(database)?;
     
     // Initialize parser
     let extractor = ChunkExtractor::new();
@@ -33,7 +43,7 @@ pub async fn run(path: PathBuf, database: PathBuf) -> Result<()> {
     let mut errors = 0;
 
     // Walk directory
-    for entry in WalkDir::new(&path)
+    for entry in WalkDir::new(path)
         .into_iter()
         .filter_entry(|e| !is_hidden(e) && !is_ignored(e))
     {
@@ -111,6 +121,151 @@ pub async fn run(path: PathBuf, database: PathBuf) -> Result<()> {
     Ok(())
 }
 
+/// Git-aware indexing with location tracking
+async fn run_git_aware(path: &PathBuf, database: &PathBuf) -> Result<()> {
+    use codemate_git::GitRepository;
+
+    println!("{} Git-aware indexing {}", "→".blue(), path.display());
+
+    // Open git repository
+    let repo = match GitRepository::open(path) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("{} Failed to open git repository: {}", "✗".red(), e);
+            eprintln!("  Use without --git flag for non-git directories");
+            return Err(e.into());
+        }
+    };
+
+    let head = repo.head_commit()?;
+    println!("{} HEAD: {} - {}", "→".blue(), head.short_hash, head.summary);
+
+    // Create database directory if needed
+    if let Some(parent) = database.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    // Initialize storage
+    let storage = SqliteStorage::new(database)?;
+    
+    // Initialize parser
+    let extractor = ChunkExtractor::new();
+    
+    // Initialize embeddings
+    println!("{} Loading embedding model...", "→".blue());
+    let mut embedder = EmbeddingGenerator::new()?;
+
+    let mut total_files = 0;
+    let mut total_chunks = 0;
+    let mut total_locations = 0;
+    let mut errors = 0;
+
+    // Walk directory
+    for entry in WalkDir::new(path)
+        .into_iter()
+        .filter_entry(|e| !is_hidden(e) && !is_ignored(e))
+    {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(e) => {
+                tracing::warn!("Error walking directory: {}", e);
+                errors += 1;
+                continue;
+            }
+        };
+
+        if !entry.file_type().is_file() {
+            continue;
+        }
+
+        let file_path = entry.path();
+        
+        // Skip non-code files
+        let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        if !is_code_file(ext) {
+            continue;
+        }
+
+        // Get relative path for location tracking
+        let relative_path = file_path.strip_prefix(path)
+            .unwrap_or(file_path)
+            .to_string_lossy()
+            .to_string();
+
+        total_files += 1;
+        
+        // Extract chunks
+        let chunks = match extractor.extract_file(file_path) {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!("Error parsing {}: {}", file_path.display(), e);
+                errors += 1;
+                continue;
+            }
+        };
+
+        // Get blame info for the file (optional)
+        let blame_info = repo.blame_file(&relative_path).ok();
+
+        // Store chunks with location info
+        for chunk in &chunks {
+            // Store chunk
+            ChunkStore::put(&storage, chunk).await?;
+            
+            // Generate and store embedding
+            let embedding_text = format!(
+                "{} {}\n{}",
+                chunk.symbol_name.as_deref().unwrap_or(""),
+                chunk.docstring.as_deref().unwrap_or(""),
+                &chunk.content
+            );
+            
+            if let Ok(embedding) = embedder.embed(&embedding_text) {
+                VectorStore::put(&storage, &chunk.content_hash, &embedding).await?;
+            }
+
+            // Create location with git info
+            let mut location = ChunkLocation::new(
+                chunk.content_hash.clone(),
+                relative_path.clone(),
+                0, // TODO: track actual byte offsets
+                chunk.byte_size,
+                chunk.line_count,
+                chunk.line_count,
+            ).with_commit(head.hash.clone());
+
+            // Add blame info if available
+            if let Some(ref blame) = blame_info {
+                if let Some(info) = blame.first() {
+                    location = location
+                        .with_author(info.author())
+                        .with_timestamp(info.timestamp.to_rfc3339());
+                }
+            }
+
+            LocationStore::put_location(&storage, &location).await?;
+            total_locations += 1;
+            total_chunks += 1;
+        }
+
+        if total_files % 10 == 0 {
+            print!("\r{} Indexed {} files, {} chunks...", "→".blue(), total_files, total_chunks);
+        }
+    }
+
+    println!();
+    println!();
+    println!("{} Git-aware indexing complete!", "✓".green());
+    println!("  Commit: {} ({})", head.short_hash, head.summary);
+    println!("  Files: {}", total_files);
+    println!("  Chunks: {}", total_chunks);
+    println!("  Locations: {}", total_locations);
+    println!("  Errors: {}", errors);
+    println!("  Database: {}", database.display());
+
+    Ok(())
+}
+
 fn is_hidden(entry: &walkdir::DirEntry) -> bool {
     entry
         .file_name()
@@ -133,3 +288,4 @@ fn is_code_file(ext: &str) -> bool {
         "rs" | "py" | "ts" | "tsx" | "js" | "jsx" | "go" | "java" | "c" | "cpp" | "h" | "hpp" | "tf" | "tfvars" | "hcl"
     )
 }
+

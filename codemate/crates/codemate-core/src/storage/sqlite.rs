@@ -1,9 +1,9 @@
 //! SQLite storage backend implementation.
 
-use crate::chunk::{Chunk, ChunkKind, Language};
+use crate::chunk::{Chunk, ChunkKind, ChunkLocation, Language};
 use crate::content_hash::ContentHash;
 use crate::error::Result;
-use crate::storage::traits::{ChunkStore, Embedding, SimilarityResult, VectorStore};
+use crate::storage::traits::{ChunkStore, Embedding, LocationStore, SimilarityResult, VectorStore};
 use async_trait::async_trait;
 use rusqlite::{params, Connection};
 use std::path::Path;
@@ -65,6 +65,26 @@ impl SqliteStorage {
                 dimensions      INTEGER NOT NULL,
                 created_at      TEXT NOT NULL DEFAULT (datetime('now'))
             );
+
+            -- Locations table (for git-aware tracking)
+            CREATE TABLE IF NOT EXISTS locations (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                content_hash    TEXT NOT NULL,
+                file_path       TEXT NOT NULL,
+                byte_start      INTEGER NOT NULL,
+                byte_end        INTEGER NOT NULL,
+                line_start      INTEGER NOT NULL,
+                line_end        INTEGER NOT NULL,
+                commit_hash     TEXT,
+                author          TEXT,
+                timestamp       TEXT,
+                created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(content_hash, file_path, commit_hash)
+            );
+            
+            CREATE INDEX IF NOT EXISTS idx_locations_hash ON locations(content_hash);
+            CREATE INDEX IF NOT EXISTS idx_locations_commit ON locations(commit_hash);
+            CREATE INDEX IF NOT EXISTS idx_locations_file ON locations(file_path);
             "#,
         )?;
         Ok(())
@@ -285,6 +305,137 @@ impl VectorStore for SqliteStorage {
             VectorStore::put(self, hash, embedding).await?;
         }
         Ok(())
+    }
+}
+
+#[async_trait]
+impl LocationStore for SqliteStorage {
+    async fn put_location(&self, location: &ChunkLocation) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            r#"
+            INSERT OR REPLACE INTO locations 
+            (content_hash, file_path, byte_start, byte_end, line_start, line_end, commit_hash, author, timestamp)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            "#,
+            params![
+                location.content_hash.to_hex(),
+                location.file_path,
+                location.byte_start as i64,
+                location.byte_end as i64,
+                location.line_start as i64,
+                location.line_end as i64,
+                location.commit_hash,
+                location.author,
+                location.timestamp,
+            ],
+        )?;
+        Ok(())
+    }
+
+    async fn get_locations(&self, content_hash: &ContentHash) -> Result<Vec<ChunkLocation>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT content_hash, file_path, byte_start, byte_end, line_start, line_end, commit_hash, author, timestamp FROM locations WHERE content_hash = ?1 ORDER BY created_at DESC",
+        )?;
+
+        let locations = stmt
+            .query_map(params![content_hash.to_hex()], |row| {
+                Ok(ChunkLocation {
+                    content_hash: ContentHash::from_hex(&row.get::<_, String>(0)?).unwrap(),
+                    file_path: row.get(1)?,
+                    byte_start: row.get::<_, i64>(2)? as usize,
+                    byte_end: row.get::<_, i64>(3)? as usize,
+                    line_start: row.get::<_, i64>(4)? as usize,
+                    line_end: row.get::<_, i64>(5)? as usize,
+                    commit_hash: row.get(6)?,
+                    author: row.get(7)?,
+                    timestamp: row.get(8)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(locations)
+    }
+
+    async fn get_locations_at_commit(&self, commit_hash: &str) -> Result<Vec<ChunkLocation>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT content_hash, file_path, byte_start, byte_end, line_start, line_end, commit_hash, author, timestamp FROM locations WHERE commit_hash = ?1 ORDER BY file_path",
+        )?;
+
+        let locations = stmt
+            .query_map(params![commit_hash], |row| {
+                Ok(ChunkLocation {
+                    content_hash: ContentHash::from_hex(&row.get::<_, String>(0)?).unwrap(),
+                    file_path: row.get(1)?,
+                    byte_start: row.get::<_, i64>(2)? as usize,
+                    byte_end: row.get::<_, i64>(3)? as usize,
+                    line_start: row.get::<_, i64>(4)? as usize,
+                    line_end: row.get::<_, i64>(5)? as usize,
+                    commit_hash: row.get(6)?,
+                    author: row.get(7)?,
+                    timestamp: row.get(8)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(locations)
+    }
+
+    async fn get_locations_in_file(&self, file_path: &str) -> Result<Vec<ChunkLocation>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT content_hash, file_path, byte_start, byte_end, line_start, line_end, commit_hash, author, timestamp FROM locations WHERE file_path = ?1 ORDER BY line_start",
+        )?;
+
+        let locations = stmt
+            .query_map(params![file_path], |row| {
+                Ok(ChunkLocation {
+                    content_hash: ContentHash::from_hex(&row.get::<_, String>(0)?).unwrap(),
+                    file_path: row.get(1)?,
+                    byte_start: row.get::<_, i64>(2)? as usize,
+                    byte_end: row.get::<_, i64>(3)? as usize,
+                    line_start: row.get::<_, i64>(4)? as usize,
+                    line_end: row.get::<_, i64>(5)? as usize,
+                    commit_hash: row.get(6)?,
+                    author: row.get(7)?,
+                    timestamp: row.get(8)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(locations)
+    }
+
+    async fn get_location_history(&self, content_hash: &ContentHash) -> Result<Vec<ChunkLocation>> {
+        // Same as get_locations but ordered by timestamp
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT content_hash, file_path, byte_start, byte_end, line_start, line_end, commit_hash, author, timestamp FROM locations WHERE content_hash = ?1 ORDER BY timestamp DESC",
+        )?;
+
+        let locations = stmt
+            .query_map(params![content_hash.to_hex()], |row| {
+                Ok(ChunkLocation {
+                    content_hash: ContentHash::from_hex(&row.get::<_, String>(0)?).unwrap(),
+                    file_path: row.get(1)?,
+                    byte_start: row.get::<_, i64>(2)? as usize,
+                    byte_end: row.get::<_, i64>(3)? as usize,
+                    line_start: row.get::<_, i64>(4)? as usize,
+                    line_end: row.get::<_, i64>(5)? as usize,
+                    commit_hash: row.get(6)?,
+                    author: row.get(7)?,
+                    timestamp: row.get(8)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(locations)
     }
 }
 

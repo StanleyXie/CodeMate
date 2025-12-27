@@ -4,7 +4,6 @@
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use colored::Colorize;
 use std::path::PathBuf;
 
 mod commands;
@@ -32,6 +31,14 @@ enum Commands {
         /// Database path
         #[arg(short, long, default_value = ".codemate/index.db")]
         database: PathBuf,
+
+        /// Enable git-aware indexing with commit tracking
+        #[arg(long)]
+        git: bool,
+
+        /// Maximum commits to index (only with --git)
+        #[arg(long, default_value = "100")]
+        max_commits: usize,
     },
 
     /// Search for code
@@ -58,6 +65,20 @@ enum Commands {
         #[arg(short, long, default_value = ".codemate/index.db")]
         database: PathBuf,
     },
+
+    /// Show history of a chunk or file
+    History {
+        /// File path or content hash to show history for
+        target: String,
+
+        /// Database path
+        #[arg(short, long, default_value = ".codemate/index.db")]
+        database: PathBuf,
+
+        /// Maximum history entries to show
+        #[arg(short, long, default_value = "20")]
+        limit: usize,
+    },
 }
 
 #[tokio::main]
@@ -76,8 +97,8 @@ async fn main() -> Result<()> {
     }
 
     match cli.command {
-        Commands::Index { path, database } => {
-            commands::index::run(path, database).await?;
+        Commands::Index { path, database, git, max_commits } => {
+            commands::index::run(path, database, git, max_commits).await?;
         }
         Commands::Search {
             query,
@@ -90,7 +111,11 @@ async fn main() -> Result<()> {
         Commands::Stats { database } => {
             commands::stats::run(database).await?;
         }
+        Commands::History { target, database, limit } => {
+            commands::history::run(target, database, limit).await?;
+        }
     }
 
     Ok(())
 }
+

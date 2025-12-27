@@ -4,6 +4,7 @@ members = [
     "crates/codemate-core",
     "crates/codemate-parser",
     "crates/codemate-embeddings",
+    "crates/codemate-git",
     "crates/codemate-cli",
 ]
 
@@ -47,3 +48,4 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 codemate-core = { path = "crates/codemate-core" }
 codemate-parser = { path = "crates/codemate-parser" }
 codemate-embeddings = { path = "crates/codemate-embeddings" }
+codemate-git = { path = "crates/codemate-git" }

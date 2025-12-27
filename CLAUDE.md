@@ -26,3 +26,9 @@ Is it about interacting with YAML or XML? use 'yq'
 - AG-Hub/KRL.md # Key Requirements Log
 - AG-Hub/PRD.md # Product Requirements Documents Index
 - AG-Hub/TODO.md # TODO list for better follow up
+
+## Follow Best Practices
+- Use 'git diff' to see changes before committing
+- Use 'git log' to see history before making changes
+- Use 'git status' to see changes before committing
+- create feature branches for new features according to plan.md, based on gitflow workflow.

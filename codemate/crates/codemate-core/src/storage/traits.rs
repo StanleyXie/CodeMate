@@ -1,6 +1,6 @@
 //! Storage trait definitions.
 
-use crate::{Chunk, ContentHash, Result};
+use crate::{Chunk, ChunkLocation, ContentHash, Result};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
@@ -97,6 +97,25 @@ pub trait VectorStore: Send + Sync {
 
     /// Batch insert.
     async fn put_many(&self, items: &[(ContentHash, Embedding)]) -> Result<()>;
+}
+
+/// Location storage trait for tracking chunk locations across commits.
+#[async_trait]
+pub trait LocationStore: Send + Sync {
+    /// Store a chunk location.
+    async fn put_location(&self, location: &ChunkLocation) -> Result<()>;
+
+    /// Get all locations for a chunk (across all commits).
+    async fn get_locations(&self, content_hash: &ContentHash) -> Result<Vec<ChunkLocation>>;
+
+    /// Get locations at a specific commit.
+    async fn get_locations_at_commit(&self, commit_hash: &str) -> Result<Vec<ChunkLocation>>;
+
+    /// Get locations in a file.
+    async fn get_locations_in_file(&self, file_path: &str) -> Result<Vec<ChunkLocation>>;
+
+    /// Get location history for a chunk (all commits where it appeared).
+    async fn get_location_history(&self, content_hash: &ContentHash) -> Result<Vec<ChunkLocation>>;
 }
 
 #[cfg(test)]

@@ -1,0 +1,18 @@
+[package]
+name = "codemate-git"
+description = "Git integration for CodeMate"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+codemate-core.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+# Git operations
+git2 = "0.19"
+chrono = { version = "0.4", features = ["serde"] }

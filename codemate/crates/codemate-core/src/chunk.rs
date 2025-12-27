@@ -153,6 +153,54 @@ pub struct ChunkLocation {
     pub line_start: usize,
     /// Ending line (1-indexed)
     pub line_end: usize,
+    /// Git commit hash where this location was recorded
+    pub commit_hash: Option<String>,
+    /// Author of the original code (from git blame)
+    pub author: Option<String>,
+    /// Timestamp when the code was last modified
+    pub timestamp: Option<String>,
+}
+
+impl ChunkLocation {
+    /// Create a new chunk location.
+    pub fn new(
+        content_hash: ContentHash,
+        file_path: String,
+        byte_start: usize,
+        byte_end: usize,
+        line_start: usize,
+        line_end: usize,
+    ) -> Self {
+        Self {
+            content_hash,
+            file_path,
+            byte_start,
+            byte_end,
+            line_start,
+            line_end,
+            commit_hash: None,
+            author: None,
+            timestamp: None,
+        }
+    }
+
+    /// Set git commit info.
+    pub fn with_commit(mut self, commit_hash: String) -> Self {
+        self.commit_hash = Some(commit_hash);
+        self
+    }
+
+    /// Set author info.
+    pub fn with_author(mut self, author: String) -> Self {
+        self.author = Some(author);
+        self
+    }
+
+    /// Set timestamp.
+    pub fn with_timestamp(mut self, timestamp: String) -> Self {
+        self.timestamp = Some(timestamp);
+        self
+    }
 }
 
 #[cfg(test)]
