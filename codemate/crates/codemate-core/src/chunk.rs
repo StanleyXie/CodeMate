@@ -96,6 +96,10 @@ pub struct Chunk {
     pub docstring: Option<String>,
     /// Byte size
     pub byte_size: usize,
+    /// Starting line (1-indexed)
+    pub line_start: usize,
+    /// Ending line (1-indexed)
+    pub line_end: usize,
     /// Line count
     pub line_count: usize,
 }
@@ -121,8 +125,17 @@ impl Chunk {
             signature: None,
             docstring: None,
             byte_size,
+            line_start: 0,
+            line_end: 0,
             line_count,
         }
+    }
+
+    /// Set the line range.
+    pub fn with_line_range(mut self, start: usize, end: usize) -> Self {
+        self.line_start = start;
+        self.line_end = end;
+        self
     }
 
     /// Set the signature.
@@ -199,6 +212,60 @@ impl ChunkLocation {
     /// Set timestamp.
     pub fn with_timestamp(mut self, timestamp: String) -> Self {
         self.timestamp = Some(timestamp);
+        self
+    }
+}
+
+/// Kind of relationship between code elements.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EdgeKind {
+    /// Function or method call
+    Calls,
+    /// Module or file import
+    Imports,
+    /// Reference to a symbol
+    References,
+}
+
+impl EdgeKind {
+    /// Get the kind as a string.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            EdgeKind::Calls => "calls",
+            EdgeKind::Imports => "imports",
+            EdgeKind::References => "references",
+        }
+    }
+}
+
+/// A directed relationship between two code elements.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Edge {
+    /// Content hash of the source chunk
+    pub source_hash: ContentHash,
+    /// Query for the target (e.g., "GitRepository::open" or "std::path::Path")
+    pub target_query: String,
+    /// Kind of relationship
+    pub kind: EdgeKind,
+    /// Line number in the source file where this edge originates
+    pub line_number: Option<usize>,
+}
+
+impl Edge {
+    /// Create a new edge.
+    pub fn new(source_hash: ContentHash, target_query: String, kind: EdgeKind) -> Self {
+        Self {
+            source_hash,
+            target_query,
+            kind,
+            line_number: None,
+        }
+    }
+
+    /// Set the line number.
+    pub fn with_line(mut self, line: usize) -> Self {
+        self.line_number = Some(line);
         self
     }
 }

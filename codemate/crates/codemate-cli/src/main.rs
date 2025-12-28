@@ -79,6 +79,30 @@ enum Commands {
         #[arg(short, long, default_value = "20")]
         limit: usize,
     },
+
+    /// Explore code graph relationships
+    Graph {
+        #[command(subcommand)]
+        subcommand: GraphSubcommand,
+
+        /// Database path
+        #[arg(short, long, default_value = ".codemate/index.db")]
+        database: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum GraphSubcommand {
+    /// Find callers of a function or method
+    Callers {
+        /// Symbol name to find callers for
+        symbol: String,
+    },
+    /// Find dependencies of a file
+    Deps {
+        /// File path to find dependencies for
+        file_path: String,
+    },
 }
 
 #[tokio::main]
@@ -113,6 +137,16 @@ async fn main() -> Result<()> {
         }
         Commands::History { target, database, limit } => {
             commands::history::run(target, database, limit).await?;
+        }
+        Commands::Graph { subcommand, database } => {
+            match subcommand {
+                GraphSubcommand::Callers { symbol } => {
+                    commands::graph::run_callers(symbol, database).await?;
+                }
+                GraphSubcommand::Deps { file_path } => {
+                    commands::graph::run_deps(file_path, database).await?;
+                }
+            }
         }
     }
 

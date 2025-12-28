@@ -19,6 +19,8 @@ pub struct BlameInfo {
     pub original_line: usize,
     /// Current line number.
     pub final_line: usize,
+    /// Number of lines in this hunk.
+    pub line_count: usize,
 }
 
 impl BlameInfo {
@@ -53,6 +55,7 @@ impl GitRepository {
                 timestamp,
                 original_line: hunk.orig_start_line(),
                 final_line: hunk.final_start_line(),
+                line_count: hunk.lines_in_hunk(),
             };
             infos.push(info);
         }
@@ -65,7 +68,12 @@ impl GitRepository {
         let all_blame = self.blame_file(file_path)?;
         
         Ok(all_blame.into_iter()
-            .filter(|b| b.final_line >= start_line && b.final_line <= end_line)
+            .filter(|b| {
+                let hunk_start = b.final_line;
+                let hunk_end = hunk_start + b.line_count - 1;
+                // Check for overlap: (hunk_start <= end_line) && (hunk_end >= start_line)
+                hunk_start <= end_line && hunk_end >= start_line
+            })
             .collect())
     }
 

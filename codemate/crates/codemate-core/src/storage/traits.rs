@@ -1,6 +1,6 @@
 //! Storage trait definitions.
 
-use crate::{Chunk, ChunkLocation, ContentHash, Result};
+use crate::{Chunk, ChunkLocation, ContentHash, Edge, Result};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
@@ -97,6 +97,22 @@ pub trait VectorStore: Send + Sync {
 
     /// Batch insert.
     async fn put_many(&self, items: &[(ContentHash, Embedding)]) -> Result<()>;
+}
+
+/// Graph storage trait for tracking relationships between code elements.
+#[async_trait]
+pub trait GraphStore: Send + Sync {
+    /// Add a relationship edge.
+    async fn add_edge(&self, edge: &Edge) -> Result<()>;
+
+    /// Batch add edges.
+    async fn add_edges(&self, edges: &[Edge]) -> Result<()>;
+
+    /// Get outgoing edges for a chunk.
+    async fn get_outgoing_edges(&self, source_hash: &ContentHash) -> Result<Vec<Edge>>;
+
+    /// Get incoming edges for a target query.
+    async fn get_incoming_edges(&self, target_query: &str) -> Result<Vec<Edge>>;
 }
 
 /// Location storage trait for tracking chunk locations across commits.

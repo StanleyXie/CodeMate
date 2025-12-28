@@ -22,13 +22,20 @@ Is it about SELECTING from multiple results? pipe to 'fzf'
 Is it about interacting with JSON? use 'jq' 
 Is it about interacting with YAML or XML? use 'yq'
 
+## CodeMate Commands
+- Build: `cargo build`
+- Test: `cargo test`
+- Index: `./target/debug/codemate index <PATH> --database <DB_PATH>`
+- Search: `./target/debug/codemate search "query" --database <DB_PATH>`
+- History: `./target/debug/codemate history <FILE> --database <DB_PATH>`
+
 ## Key files
-- AG-Hub/KRL.md # Key Requirements Log
+- AG-Hub/plan.md # Project implementation roadmap
 - AG-Hub/PRD.md # Product Requirements Documents Index
-- AG-Hub/TODO.md # TODO list for better follow up
+- codemate/crates/ # Core implementation crates
 
 ## Follow Best Practices
 - Use 'git diff' to see changes before committing
 - Use 'git log' to see history before making changes
 - Use 'git status' to see changes before committing
-- create feature branches for new features according to plan.md, based on gitflow workflow.
+- create feature branches for new features according to plan.md, using `git worktree` as defined in [.agent/workflows/feature.md](.agent/workflows/feature.md).

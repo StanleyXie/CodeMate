@@ -1,6 +1,6 @@
 //! Chunk extraction from source code using tree-sitter.
 
-use codemate_core::{Chunk, ChunkKind, Language, Result};
+use codemate_core::{Chunk, ChunkKind, Language, Edge, EdgeKind, Result, ContentHash};
 use std::path::Path;
 
 /// Extracts chunks from source code files.
@@ -27,8 +27,8 @@ impl ChunkExtractor {
         self
     }
 
-    /// Extract chunks from a file.
-    pub fn extract_file(&self, path: &Path) -> Result<Vec<Chunk>> {
+    /// Extract chunks and edges from a file.
+    pub fn extract_file(&self, path: &Path) -> Result<(Vec<Chunk>, Vec<Edge>)> {
         let content = std::fs::read_to_string(path)?;
         let extension = path
             .extension()
@@ -39,8 +39,8 @@ impl ChunkExtractor {
         self.extract(&content, language)
     }
 
-    /// Extract chunks from source code.
-    pub fn extract(&self, content: &str, language: Language) -> Result<Vec<Chunk>> {
+    /// Extract chunks and edges from source code.
+    pub fn extract(&self, content: &str, language: Language) -> Result<(Vec<Chunk>, Vec<Edge>)> {
         match language {
             Language::Rust => self.extract_rust(content),
             Language::Python => self.extract_python(content),
@@ -52,7 +52,7 @@ impl ChunkExtractor {
     }
 
     /// Extract chunks from Rust source code.
-    fn extract_rust(&self, content: &str) -> Result<Vec<Chunk>> {
+    fn extract_rust(&self, content: &str) -> Result<(Vec<Chunk>, Vec<Edge>)> {
         let mut parser = tree_sitter::Parser::new();
         parser
             .set_language(&tree_sitter_rust::LANGUAGE.into())
@@ -63,8 +63,9 @@ impl ChunkExtractor {
             .ok_or_else(|| codemate_core::Error::Parse("Failed to parse Rust".to_string()))?;
 
         let mut chunks = Vec::new();
-        self.extract_rust_nodes(&tree.root_node(), content, &mut chunks);
-        Ok(chunks)
+        let mut edges = Vec::new();
+        self.extract_rust_nodes(&tree.root_node(), content, &mut chunks, &mut edges);
+        Ok((chunks, edges))
     }
 
     fn extract_rust_nodes(
@@ -72,11 +73,13 @@ impl ChunkExtractor {
         node: &tree_sitter::Node,
         content: &str,
         chunks: &mut Vec<Chunk>,
+        edges: &mut Vec<Edge>,
     ) {
         // Extract function definitions, structs, enums, traits, impls
         match node.kind() {
             "function_item" => {
                 if let Some(chunk) = self.node_to_chunk(node, content, Language::Rust, ChunkKind::Function) {
+                    self.extract_rust_edges(node, content, &chunk, edges);
                     chunks.push(chunk);
                 }
             }
@@ -105,14 +108,61 @@ impl ChunkExtractor {
                     chunks.push(chunk);
                 }
             }
+            "use_declaration" => {
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    if child.kind() == "use_path" {
+                        if let Ok(text) = child.utf8_text(content.as_bytes()) {
+                            edges.push(Edge::new(
+                                // For file-level imports, we don't have a source chunk yet
+                                // so we'll associate it with a dummy "file" chunk or similar if needed.
+                                // Actually, let's just stick to function-level calls for now
+                                // or find a way to associate with the module/file chunk.
+                                // If chunks is empty, it's a file header import.
+                                ContentHash::from_content(content.as_bytes()),
+                                text.to_string(),
+                                EdgeKind::Imports,
+                            ).with_line(child.start_position().row + 1));
+                        }
+                    }
+                }
+            }
+            "call_expression" => {
+                // If we are inside a function, we'll handle this in extract_rust_edges
+            }
             _ => {
                 // Recurse into children
                 let mut cursor = node.walk();
                 for child in node.children(&mut cursor) {
-                    self.extract_rust_nodes(&child, content, chunks);
+                    self.extract_rust_nodes(&child, content, chunks, edges);
                 }
             }
         }
+    }
+
+    fn extract_rust_edges(&self, node: &tree_sitter::Node, content: &str, source_chunk: &Chunk, edges: &mut Vec<Edge>) {
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() == "call_expression" {
+                if let Some(target) = self.extract_rust_call_target(&child, content) {
+                    edges.push(Edge::new(
+                        source_chunk.content_hash.clone(),
+                        target,
+                        EdgeKind::Calls,
+                    ).with_line(child.start_position().row + 1));
+                }
+            }
+            // Recurse to find nested calls
+            self.extract_rust_edges(&child, content, source_chunk, edges);
+        }
+    }
+
+    fn extract_rust_call_target(&self, node: &tree_sitter::Node, content: &str) -> Option<String> {
+        // In Rust, a call_expression's first child is the function being called (field "function")
+        if let Some(function_node) = node.child_by_field_name("function") {
+            return Some(function_node.utf8_text(content.as_bytes()).ok()?.to_string());
+        }
+        None
     }
 
     fn node_to_chunk(
@@ -133,12 +183,15 @@ impl ChunkExtractor {
         // Extract symbol name
         let symbol_name = self.extract_symbol_name(node, content);
 
+        let start_pos = node.start_position();
+        let end_pos = node.end_position();
+
         Some(Chunk::new(
             text.to_string(),
             language,
             kind,
             symbol_name,
-        ))
+        ).with_line_range(start_pos.row + 1, end_pos.row + 1))
     }
 
     fn extract_symbol_name(&self, node: &tree_sitter::Node, content: &str) -> Option<String> {
@@ -155,7 +208,7 @@ impl ChunkExtractor {
     }
 
     /// Extract chunks from Python source code.
-    fn extract_python(&self, content: &str) -> Result<Vec<Chunk>> {
+    fn extract_python(&self, content: &str) -> Result<(Vec<Chunk>, Vec<Edge>)> {
         let mut parser = tree_sitter::Parser::new();
         parser
             .set_language(&tree_sitter_python::LANGUAGE.into())
@@ -166,8 +219,9 @@ impl ChunkExtractor {
             .ok_or_else(|| codemate_core::Error::Parse("Failed to parse Python".to_string()))?;
 
         let mut chunks = Vec::new();
-        self.extract_python_nodes(&tree.root_node(), content, &mut chunks);
-        Ok(chunks)
+        let mut edges = Vec::new();
+        self.extract_python_nodes(&tree.root_node(), content, &mut chunks, &mut edges);
+        Ok((chunks, edges))
     }
 
     fn extract_python_nodes(
@@ -175,10 +229,12 @@ impl ChunkExtractor {
         node: &tree_sitter::Node,
         content: &str,
         chunks: &mut Vec<Chunk>,
+        edges: &mut Vec<Edge>,
     ) {
         match node.kind() {
             "function_definition" => {
                 if let Some(chunk) = self.node_to_chunk(node, content, Language::Python, ChunkKind::Function) {
+                    self.extract_python_edges(node, content, &chunk, edges);
                     chunks.push(chunk);
                 }
             }
@@ -187,17 +243,59 @@ impl ChunkExtractor {
                     chunks.push(chunk);
                 }
             }
+            "import_statement" | "import_from_statement" => {
+                if let Ok(text) = node.utf8_text(content.as_bytes()) {
+                     edges.push(Edge::new(
+                        ContentHash::from_content(content.as_bytes()),
+                        text.trim().to_string(),
+                        EdgeKind::Imports,
+                    ).with_line(node.start_position().row + 1));
+                }
+            }
             _ => {
                 let mut cursor = node.walk();
                 for child in node.children(&mut cursor) {
-                    self.extract_python_nodes(&child, content, chunks);
+                    self.extract_python_nodes(&child, content, chunks, edges);
                 }
             }
         }
     }
 
+    fn extract_python_edges(&self, node: &tree_sitter::Node, content: &str, source_chunk: &Chunk, edges: &mut Vec<Edge>) {
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() == "call" || child.kind() == "call_expression" {
+                if let Some(target) = self.extract_python_call_target(&child, content) {
+                    edges.push(Edge::new(
+                        source_chunk.content_hash.clone(),
+                        target,
+                        EdgeKind::Calls,
+                    ).with_line(child.start_position().row + 1));
+                }
+            }
+            self.extract_python_edges(&child, content, source_chunk, edges);
+        }
+    }
+
+    fn extract_python_call_target(&self, node: &tree_sitter::Node, content: &str) -> Option<String> {
+        // In Python, a call's first child is the function being called (field "function")
+        if let Some(function_node) = node.child_by_field_name("function") {
+            return function_node.utf8_text(content.as_bytes()).ok().map(|s| s.to_string());
+        }
+        
+        // Fallback: try to find an identifier child
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() == "identifier" {
+                return child.utf8_text(content.as_bytes()).ok().map(|s| s.to_string());
+            }
+        }
+        
+        None
+    }
+
     /// Extract chunks from TypeScript/JavaScript source code.
-    fn extract_typescript(&self, content: &str, language: Language) -> Result<Vec<Chunk>> {
+    fn extract_typescript(&self, content: &str, language: Language) -> Result<(Vec<Chunk>, Vec<Edge>)> {
         let mut parser = tree_sitter::Parser::new();
         parser
             .set_language(&tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into())
@@ -208,8 +306,9 @@ impl ChunkExtractor {
             .ok_or_else(|| codemate_core::Error::Parse("Failed to parse TypeScript".to_string()))?;
 
         let mut chunks = Vec::new();
-        self.extract_typescript_nodes(&tree.root_node(), content, language, &mut chunks);
-        Ok(chunks)
+        let mut edges = Vec::new();
+        self.extract_typescript_nodes(&tree.root_node(), content, language, &mut chunks, &mut edges);
+        Ok((chunks, edges))
     }
 
     fn extract_typescript_nodes(
@@ -218,10 +317,12 @@ impl ChunkExtractor {
         content: &str,
         language: Language,
         chunks: &mut Vec<Chunk>,
+        edges: &mut Vec<Edge>,
     ) {
         match node.kind() {
             "function_declaration" | "arrow_function" | "method_definition" => {
                 if let Some(chunk) = self.node_to_chunk(node, content, language, ChunkKind::Function) {
+                    self.extract_typescript_edges(node, content, &chunk, edges);
                     chunks.push(chunk);
                 }
             }
@@ -230,17 +331,44 @@ impl ChunkExtractor {
                     chunks.push(chunk);
                 }
             }
+            "import_declaration" => {
+                // TODO: Extract imports
+            }
             _ => {
                 let mut cursor = node.walk();
                 for child in node.children(&mut cursor) {
-                    self.extract_typescript_nodes(&child, content, language, chunks);
+                    self.extract_typescript_nodes(&child, content, language, chunks, edges);
                 }
             }
         }
     }
 
+    fn extract_typescript_edges(&self, node: &tree_sitter::Node, content: &str, source_chunk: &Chunk, edges: &mut Vec<Edge>) {
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() == "call_expression" {
+                if let Some(target) = self.extract_typescript_call_target(&child, content) {
+                    edges.push(Edge::new(
+                        source_chunk.content_hash.clone(),
+                        target,
+                        EdgeKind::Calls,
+                    ).with_line(child.start_position().row + 1));
+                }
+            }
+            self.extract_typescript_edges(&child, content, source_chunk, edges);
+        }
+    }
+
+    fn extract_typescript_call_target(&self, node: &tree_sitter::Node, content: &str) -> Option<String> {
+        // In TypeScript, a call_expression's first child is the function being called (field "function")
+        if let Some(function_node) = node.child_by_field_name("function") {
+            return Some(function_node.utf8_text(content.as_bytes()).ok()?.to_string());
+        }
+        None
+    }
+
     /// Extract chunks from Go source code.
-    fn extract_go(&self, content: &str) -> Result<Vec<Chunk>> {
+    fn extract_go(&self, content: &str) -> Result<(Vec<Chunk>, Vec<Edge>)> {
         let mut parser = tree_sitter::Parser::new();
         parser
             .set_language(&tree_sitter_go::LANGUAGE.into())
@@ -251,8 +379,9 @@ impl ChunkExtractor {
             .ok_or_else(|| codemate_core::Error::Parse("Failed to parse Go".to_string()))?;
 
         let mut chunks = Vec::new();
-        self.extract_go_nodes(&tree.root_node(), content, &mut chunks);
-        Ok(chunks)
+        let mut edges = Vec::new();
+        self.extract_go_nodes(&tree.root_node(), content, &mut chunks, &mut edges);
+        Ok((chunks, edges))
     }
 
     fn extract_go_nodes(
@@ -260,10 +389,12 @@ impl ChunkExtractor {
         node: &tree_sitter::Node,
         content: &str,
         chunks: &mut Vec<Chunk>,
+        edges: &mut Vec<Edge>,
     ) {
         match node.kind() {
             "function_declaration" | "method_declaration" => {
                 if let Some(chunk) = self.node_to_chunk(node, content, Language::Go, ChunkKind::Function) {
+                    self.extract_go_edges(node, content, &chunk, edges);
                     chunks.push(chunk);
                 }
             }
@@ -288,17 +419,44 @@ impl ChunkExtractor {
                     }
                 }
             }
+            "import_declaration" => {
+                // TODO: Extract imports
+            }
             _ => {
                 let mut cursor = node.walk();
                 for child in node.children(&mut cursor) {
-                    self.extract_go_nodes(&child, content, chunks);
+                    self.extract_go_nodes(&child, content, chunks, edges);
                 }
             }
         }
     }
 
+    fn extract_go_edges(&self, node: &tree_sitter::Node, content: &str, source_chunk: &Chunk, edges: &mut Vec<Edge>) {
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() == "call_expression" {
+                if let Some(target) = self.extract_go_call_target(&child, content) {
+                    edges.push(Edge::new(
+                        source_chunk.content_hash.clone(),
+                        target,
+                        EdgeKind::Calls,
+                    ).with_line(child.start_position().row + 1));
+                }
+            }
+            self.extract_go_edges(&child, content, source_chunk, edges);
+        }
+    }
+
+    fn extract_go_call_target(&self, node: &tree_sitter::Node, content: &str) -> Option<String> {
+        // In Go, a call_expression's first child is the function being called (field "function")
+        if let Some(function_node) = node.child_by_field_name("function") {
+            return Some(function_node.utf8_text(content.as_bytes()).ok()?.to_string());
+        }
+        None
+    }
+
     /// Extract chunks from HCL/Terraform source code.
-    fn extract_hcl(&self, content: &str) -> Result<Vec<Chunk>> {
+    fn extract_hcl(&self, content: &str) -> Result<(Vec<Chunk>, Vec<Edge>)> {
         let mut parser = tree_sitter::Parser::new();
         parser
             .set_language(&tree_sitter_hcl::LANGUAGE.into())
@@ -309,8 +467,9 @@ impl ChunkExtractor {
             .ok_or_else(|| codemate_core::Error::Parse("Failed to parse HCL".to_string()))?;
 
         let mut chunks = Vec::new();
-        self.extract_hcl_nodes(&tree.root_node(), content, &mut chunks);
-        Ok(chunks)
+        let mut edges = Vec::new();
+        self.extract_hcl_nodes(&tree.root_node(), content, &mut chunks, &mut edges);
+        Ok((chunks, edges))
     }
 
     fn extract_hcl_nodes(
@@ -318,6 +477,7 @@ impl ChunkExtractor {
         node: &tree_sitter::Node,
         content: &str,
         chunks: &mut Vec<Chunk>,
+        edges: &mut Vec<Edge>,
     ) {
         match node.kind() {
             "block" => {
@@ -354,7 +514,7 @@ impl ChunkExtractor {
             _ => {
                 let mut cursor = node.walk();
                 for child in node.children(&mut cursor) {
-                    self.extract_hcl_nodes(&child, content, chunks);
+                    self.extract_hcl_nodes(&child, content, chunks, edges);
                 }
             }
         }
@@ -390,10 +550,10 @@ impl ChunkExtractor {
     }
 
     /// Fallback extraction for unsupported languages.
-    fn extract_fallback(&self, content: &str, language: Language) -> Result<Vec<Chunk>> {
+    fn extract_fallback(&self, content: &str, language: Language) -> Result<(Vec<Chunk>, Vec<Edge>)> {
         // For unsupported languages, treat entire file as one chunk
         let chunk = Chunk::new(content.to_string(), language, ChunkKind::Block, None);
-        Ok(vec![chunk])
+        Ok((vec![chunk], Vec::new()))
     }
 }
 

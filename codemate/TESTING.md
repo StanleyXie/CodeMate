@@ -72,6 +72,7 @@ cargo watch -x "test --lib"
 | Crate | Unit Tests | Integration |
 |-------|------------|-------------|
 | codemate-core | ✅ 8 tests | ✅ 5 tests |
+| codemate-git | ✅ 1 test | ✅ (via e2e) |
 | codemate-parser | ✅ 3 tests | ✅ (via e2e) |
 | codemate-embeddings | ⚠️ Needs mocks | ⚠️ (via e2e) |
 | codemate-cli | ⚠️ Needs fixtures | ⚠️ (via e2e) |

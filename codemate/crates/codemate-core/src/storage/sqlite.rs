@@ -1,9 +1,11 @@
 //! SQLite storage backend implementation.
 
-use crate::chunk::{Chunk, ChunkKind, ChunkLocation, Language};
+use crate::chunk::{Chunk, ChunkKind, ChunkLocation, Edge, EdgeKind, Language};
 use crate::content_hash::ContentHash;
 use crate::error::Result;
-use crate::storage::traits::{ChunkStore, Embedding, LocationStore, SimilarityResult, VectorStore};
+use crate::storage::traits::{
+    ChunkStore, Embedding, GraphStore, LocationStore, SimilarityResult, VectorStore,
+};
 use async_trait::async_trait;
 use rusqlite::{params, Connection};
 use std::path::Path;
@@ -50,6 +52,8 @@ impl SqliteStorage {
                 signature       TEXT,
                 docstring       TEXT,
                 byte_size       INTEGER NOT NULL,
+                line_start      INTEGER NOT NULL DEFAULT 0,
+                line_end        INTEGER NOT NULL DEFAULT 0,
                 line_count      INTEGER NOT NULL,
                 created_at      TEXT NOT NULL DEFAULT (datetime('now'))
             );
@@ -85,6 +89,19 @@ impl SqliteStorage {
             CREATE INDEX IF NOT EXISTS idx_locations_hash ON locations(content_hash);
             CREATE INDEX IF NOT EXISTS idx_locations_commit ON locations(commit_hash);
             CREATE INDEX IF NOT EXISTS idx_locations_file ON locations(file_path);
+
+            -- Edges table for call graph and imports
+            CREATE TABLE IF NOT EXISTS edges (
+                source_hash     TEXT NOT NULL,
+                target_query    TEXT NOT NULL,
+                edge_kind       TEXT NOT NULL,
+                line_number     INTEGER,
+                created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY(source_hash) REFERENCES chunks(content_hash)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source_hash);
+            CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target_query);
             "#,
         )?;
         Ok(())
@@ -98,8 +115,8 @@ impl ChunkStore for SqliteStorage {
         conn.execute(
             r#"
             INSERT OR REPLACE INTO chunks 
-            (content_hash, content, language, chunk_kind, symbol_name, signature, docstring, byte_size, line_count)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            (content_hash, content, language, chunk_kind, symbol_name, signature, docstring, byte_size, line_start, line_end, line_count)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
             "#,
             params![
                 chunk.content_hash.to_hex(),
@@ -109,8 +126,10 @@ impl ChunkStore for SqliteStorage {
                 chunk.symbol_name,
                 chunk.signature,
                 chunk.docstring,
-                chunk.byte_size,
-                chunk.line_count,
+                chunk.byte_size as i64,
+                chunk.line_start as i64,
+                chunk.line_end as i64,
+                chunk.line_count as i64,
             ],
         )?;
         Ok(chunk.content_hash.clone())
@@ -120,7 +139,7 @@ impl ChunkStore for SqliteStorage {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             r#"
-            SELECT content_hash, content, language, chunk_kind, symbol_name, signature, docstring, byte_size, line_count
+            SELECT content_hash, content, language, chunk_kind, symbol_name, signature, docstring, byte_size, line_start, line_end, line_count
             FROM chunks WHERE content_hash = ?1
             "#,
         )?;
@@ -134,7 +153,9 @@ impl ChunkStore for SqliteStorage {
             let signature: Option<String> = row.get(5)?;
             let docstring: Option<String> = row.get(6)?;
             let byte_size: usize = row.get(7)?;
-            let line_count: usize = row.get(8)?;
+            let line_start: usize = row.get(8)?;
+            let line_end: usize = row.get(9)?;
+            let line_count: usize = row.get(10)?;
 
             let language = Language::from_extension(&lang_str);
             let kind = match kind_str.as_str() {
@@ -157,6 +178,8 @@ impl ChunkStore for SqliteStorage {
                 signature,
                 docstring,
                 byte_size,
+                line_start,
+                line_end,
                 line_count,
             })
         });
@@ -439,6 +462,108 @@ impl LocationStore for SqliteStorage {
     }
 }
 
+#[async_trait]
+impl GraphStore for SqliteStorage {
+    async fn add_edge(&self, edge: &Edge) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            r#"
+            INSERT INTO edges (source_hash, target_query, edge_kind, line_number)
+            VALUES (?1, ?2, ?3, ?4)
+            "#,
+            params![
+                edge.source_hash.to_hex(),
+                edge.target_query,
+                edge.kind.as_str(),
+                edge.line_number.map(|l| l as i64),
+            ],
+        )?;
+        Ok(())
+    }
+
+    async fn add_edges(&self, edges: &[Edge]) -> Result<()> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        {
+            let mut stmt = tx.prepare(
+                "INSERT INTO edges (source_hash, target_query, edge_kind, line_number) VALUES (?1, ?2, ?3, ?4)"
+            )?;
+            for edge in edges {
+                stmt.execute(params![
+                    edge.source_hash.to_hex(),
+                    edge.target_query,
+                    edge.kind.as_str(),
+                    edge.line_number.map(|l| l as i64),
+                ])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    async fn get_outgoing_edges(&self, source_hash: &ContentHash) -> Result<Vec<Edge>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT source_hash, target_query, edge_kind, line_number FROM edges WHERE source_hash = ?1"
+        )?;
+
+        let edges = stmt.query_map(params![source_hash.to_hex()], |row| {
+            let hash_str: String = row.get(0)?;
+            let target_query: String = row.get(1)?;
+            let kind_str: String = row.get(2)?;
+            let line_number: Option<i64> = row.get(3)?;
+
+            let kind = match kind_str.as_str() {
+                "calls" => EdgeKind::Calls,
+                "imports" => EdgeKind::Imports,
+                _ => EdgeKind::References,
+            };
+
+            Ok(Edge {
+                source_hash: ContentHash::from_hex(&hash_str).unwrap(),
+                target_query,
+                kind,
+                line_number: line_number.map(|l| l as usize),
+            })
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+
+        Ok(edges)
+    }
+
+    async fn get_incoming_edges(&self, target_query: &str) -> Result<Vec<Edge>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT source_hash, target_query, edge_kind, line_number FROM edges WHERE target_query = ?1"
+        )?;
+
+        let edges = stmt.query_map(params![target_query], |row| {
+            let hash_str: String = row.get(0)?;
+            let target_query: String = row.get(1)?;
+            let kind_str: String = row.get(2)?;
+            let line_number: Option<i64> = row.get(3)?;
+
+            let kind = match kind_str.as_str() {
+                "calls" => EdgeKind::Calls,
+                "imports" => EdgeKind::Imports,
+                _ => EdgeKind::References,
+            };
+
+            Ok(Edge {
+                source_hash: ContentHash::from_hex(&hash_str).unwrap(),
+                target_query,
+                kind,
+                line_number: line_number.map(|l| l as usize),
+            })
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+
+        Ok(edges)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -506,5 +631,32 @@ mod tests {
 
         assert_eq!(results.len(), 2);
         assert_eq!(results[0].content_hash, hash1);
+    }
+
+    #[tokio::test]
+    async fn test_graph_store() {
+        let storage = SqliteStorage::in_memory().unwrap();
+        let hash1 = ContentHash::from_content(b"test1");
+        
+        // Insert chunk first to satisfy foreign key constraint
+        let chunk = Chunk::new("test1".to_string(), Language::Rust, ChunkKind::Function, None);
+        ChunkStore::put(&storage, &chunk).await.unwrap();
+        
+        // Add edges
+        let edge1 = Edge::new(hash1.clone(), "FuncA".to_string(), EdgeKind::Calls).with_line(10);
+        let edge2 = Edge::new(hash1.clone(), "FuncB".to_string(), EdgeKind::Calls).with_line(20);
+        
+        storage.add_edges(&[edge1, edge2]).await.unwrap();
+        
+        // Verify outgoing
+        let outgoing = storage.get_outgoing_edges(&hash1).await.unwrap();
+        assert_eq!(outgoing.len(), 2);
+        assert!(outgoing.iter().any(|e| e.target_query == "FuncA" && e.line_number == Some(10)));
+        assert!(outgoing.iter().any(|e| e.target_query == "FuncB" && e.line_number == Some(20)));
+        
+        // Verify incoming
+        let incoming = storage.get_incoming_edges("FuncA").await.unwrap();
+        assert_eq!(incoming.len(), 1);
+        assert_eq!(incoming[0].source_hash, hash1);
     }
 }

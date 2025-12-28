@@ -1,7 +1,7 @@
 //! Index command implementation.
 
 use anyhow::Result;
-use codemate_core::storage::{ChunkStore, LocationStore, SqliteStorage, VectorStore};
+use codemate_core::storage::{ChunkStore, GraphStore, LocationStore, SqliteStorage, VectorStore};
 use codemate_core::ChunkLocation;
 use codemate_embeddings::EmbeddingGenerator;
 use codemate_parser::ChunkExtractor;
@@ -70,15 +70,21 @@ async fn run_simple(path: &PathBuf, database: &PathBuf) -> Result<()> {
 
         total_files += 1;
         
-        // Extract chunks
-        let chunks = match extractor.extract_file(file_path) {
-            Ok(c) => c,
+        // Extract chunks and edges
+        let (chunks, edges) = match extractor.extract_file(file_path) {
+            Ok(res) => res,
             Err(e) => {
                 tracing::warn!("Error parsing {}: {}", file_path.display(), e);
                 errors += 1;
                 continue;
             }
         };
+
+        // Get relative path for location tracking
+        let relative_path = file_path.strip_prefix(path)
+            .unwrap_or(file_path)
+            .to_string_lossy()
+            .to_string();
 
         // Store chunks and embeddings
         for chunk in &chunks {
@@ -101,8 +107,24 @@ async fn run_simple(path: &PathBuf, database: &PathBuf) -> Result<()> {
                     tracing::warn!("Error generating embedding: {}", e);
                 }
             }
+
+            // Store location
+            let location = ChunkLocation::new(
+                chunk.content_hash.clone(),
+                relative_path.clone(),
+                0,
+                chunk.byte_size,
+                chunk.line_start,
+                chunk.line_end,
+            );
+            LocationStore::put_location(&storage, &location).await?;
             
             total_chunks += 1;
+        }
+
+        // Store edges
+        if !edges.is_empty() {
+            GraphStore::add_edges(&storage, &edges).await?;
         }
 
         if total_files % 10 == 0 {
@@ -139,6 +161,11 @@ async fn run_git_aware(path: &PathBuf, database: &PathBuf) -> Result<()> {
 
     let head = repo.head_commit()?;
     println!("{} HEAD: {} - {}", "→".blue(), head.short_hash, head.summary);
+
+    let repo_root = repo.root().canonicalize()?;
+    let path = path.canonicalize()?;
+    println!("{} Repo root: {}", "→".blue(), repo_root.display());
+    println!("{} Indexing path: {}", "→".blue(), path.display());
 
     // Create database directory if needed
     if let Some(parent) = database.parent() {
@@ -178,7 +205,7 @@ async fn run_git_aware(path: &PathBuf, database: &PathBuf) -> Result<()> {
             continue;
         }
 
-        let file_path = entry.path();
+        let file_path = entry.path().canonicalize()?;
         
         // Skip non-code files
         let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
@@ -186,26 +213,23 @@ async fn run_git_aware(path: &PathBuf, database: &PathBuf) -> Result<()> {
             continue;
         }
 
-        // Get relative path for location tracking
-        let relative_path = file_path.strip_prefix(path)
-            .unwrap_or(file_path)
+        // Get path relative to git root for git operations and storage
+        let git_relative_path = file_path.strip_prefix(&repo_root)
+            .unwrap_or(&file_path)
             .to_string_lossy()
             .to_string();
 
         total_files += 1;
         
-        // Extract chunks
-        let chunks = match extractor.extract_file(file_path) {
-            Ok(c) => c,
+        // Extract chunks and edges
+        let (chunks, edges) = match extractor.extract_file(&file_path) {
+            Ok(res) => res,
             Err(e) => {
                 tracing::warn!("Error parsing {}: {}", file_path.display(), e);
                 errors += 1;
                 continue;
             }
         };
-
-        // Get blame info for the file (optional)
-        let blame_info = repo.blame_file(&relative_path).ok();
 
         // Store chunks with location info
         for chunk in &chunks {
@@ -227,25 +251,28 @@ async fn run_git_aware(path: &PathBuf, database: &PathBuf) -> Result<()> {
             // Create location with git info
             let mut location = ChunkLocation::new(
                 chunk.content_hash.clone(),
-                relative_path.clone(),
+                git_relative_path.clone(),
                 0, // TODO: track actual byte offsets
                 chunk.byte_size,
-                chunk.line_count,
-                chunk.line_count,
+                chunk.line_start,
+                chunk.line_end,
             ).with_commit(head.hash.clone());
 
-            // Add blame info if available
-            if let Some(ref blame) = blame_info {
-                if let Some(info) = blame.first() {
-                    location = location
-                        .with_author(info.author())
-                        .with_timestamp(info.timestamp.to_rfc3339());
-                }
+            // Add accurate blame info if available
+            if let Ok(Some(info)) = repo.primary_author(&git_relative_path, chunk.line_start, chunk.line_end) {
+                location = location
+                    .with_author(info.author())
+                    .with_timestamp(info.timestamp.to_rfc3339());
             }
 
             LocationStore::put_location(&storage, &location).await?;
             total_locations += 1;
             total_chunks += 1;
+        }
+
+        // Store edges
+        if !edges.is_empty() {
+            GraphStore::add_edges(&storage, &edges).await?;
         }
 
         if total_files % 10 == 0 {
@@ -267,11 +294,11 @@ async fn run_git_aware(path: &PathBuf, database: &PathBuf) -> Result<()> {
 }
 
 fn is_hidden(entry: &walkdir::DirEntry) -> bool {
-    entry
-        .file_name()
-        .to_str()
-        .map(|s| s.starts_with('.'))
-        .unwrap_or(false)
+    let name = entry.file_name().to_str().unwrap_or("");
+    if name == "." || name == ".." {
+        return false;
+    }
+    name.starts_with('.')
 }
 
 fn is_ignored(entry: &walkdir::DirEntry) -> bool {
@@ -288,4 +315,5 @@ fn is_code_file(ext: &str) -> bool {
         "rs" | "py" | "ts" | "tsx" | "js" | "jsx" | "go" | "java" | "c" | "cpp" | "h" | "hpp" | "tf" | "tfvars" | "hcl"
     )
 }
+
 

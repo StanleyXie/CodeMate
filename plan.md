@@ -10,13 +10,13 @@
 
 | Sprint | Focus | Completeness | Status |
 |--------|-------|--------------|--------|
-| Sprint 1 | MVP - Core Indexing & Basic Search | 0% | 🔜 Not Started |
-| Sprint 2 | Git-Native Indexing | 0% | ⏳ Pending |
-| Sprint 3 | Graph Index | 0% | ⏳ Pending |
+| Sprint 1 | MVP - Core Indexing & Basic Search | 100% | ✅ Complete |
+| Sprint 2 | Git-Native Indexing | 100% | ✅ Complete |
+| Sprint 3 | Graph Index | 100% | ✅ Complete |
 | Sprint 4 | Query Layer | 0% | ⏳ Pending |
 | Sprint 5 | External Interfaces | 0% | ⏳ Pending |
 
-**Overall Progress**: 0% (Design Complete, Implementation Pending)
+**Overall Progress**: 60% (Indexing and Graph Relationships Complete)
 
 ---
 
@@ -204,16 +204,13 @@ codemate/
 
 ---
 
-## Next Actions (Sprint 1)
+## Next Actions (Sprint 4)
 
-1. [ ] Initialize Rust workspace with cargo
-2. [ ] Set up GitHub repo with CI (cargo test, clippy)
-3. [ ] Implement `codemate-core` with SQLite schema
-4. [ ] Implement `codemate-parser` with tree-sitter for Rust
-5. [ ] Implement `codemate-embeddings` with fastembed
-6. [ ] Implement `codemate-cli` with `index` and `search` commands
-7. [ ] Write integration tests for end-to-end workflow
-8. [ ] Document CLI usage in README
+1. [ ] Implement Query DSL parser (author:, lang:, after:, etc.)
+2. [ ] Integrate SQLite FTS5 for full-text symbol/comment search
+3. [ ] Implement Reciprocal Rank Fusion (RRF) for search result ranking
+4. [ ] Add support for graph-based context expansion in search queries
+5. [ ] Implement query filters in CLI `search` command
 
 ---
 

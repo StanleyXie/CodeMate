@@ -10,6 +10,6 @@ pub mod storage;
 #[cfg(test)]
 pub mod testutils;
 
-pub use chunk::{Chunk, ChunkKind, ChunkLocation, Language};
+pub use chunk::{Chunk, ChunkKind, ChunkLocation, Edge, EdgeKind, Language};
 pub use content_hash::ContentHash;
 pub use error::{Error, Result};

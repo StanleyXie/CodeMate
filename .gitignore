@@ -1,0 +1,34 @@
+# Build artifacts
+target/
+build/
+dist/
+
+# CodeMate internal data
+.codemate/
+.fastembed_cache/
+**/target/
+**/build/
+**/.codemate/
+**/.fastembed_cache/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Rust
+*.lock
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Testing fixtures
+test_python.py
+test_rs.rs
+test_go.go
+test_ts.ts
+
+# User artifacts
+.gemini/antigravity/brain/

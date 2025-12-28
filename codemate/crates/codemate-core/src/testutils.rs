@@ -61,7 +61,7 @@ impl TestFixtures {
     /// Create a sample embedding with random-ish values.
     pub fn embedding(dimensions: usize, model_id: &str) -> Embedding {
         let vector: Vec<f32> = (0..dimensions)
-            .map(|i| (i as f32 / dimensions as f32))
+            .map(|i| i as f32 / dimensions as f32)
             .collect();
         Embedding::new(vector, model_id.to_string())
     }
