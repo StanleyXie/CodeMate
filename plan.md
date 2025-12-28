@@ -13,10 +13,10 @@
 | Sprint 1 | MVP - Core Indexing & Basic Search | 100% | ✅ Complete |
 | Sprint 2 | Git-Native Indexing | 100% | ✅ Complete |
 | Sprint 3 | Graph Index | 100% | ✅ Complete |
-| Sprint 4 | Query Layer | 0% | ⏳ Pending |
+| Sprint 4 | Query Layer | 100% | ✅ Complete |
 | Sprint 5 | External Interfaces | 0% | ⏳ Pending |
 
-**Overall Progress**: 60% (Indexing and Graph Relationships Complete)
+**Overall Progress**: 80% (Query Layer and Graph Visualization Complete)
 
 ---
 
@@ -204,13 +204,13 @@ codemate/
 
 ---
 
-## Next Actions (Sprint 4)
+## Next Actions (Sprint 5)
 
-1. [ ] Implement Query DSL parser (author:, lang:, after:, etc.)
-2. [ ] Integrate SQLite FTS5 for full-text symbol/comment search
-3. [ ] Implement Reciprocal Rank Fusion (RRF) for search result ranking
-4. [ ] Add support for graph-based context expansion in search queries
-5. [ ] Implement query filters in CLI `search` command
+1. [ ] Set up `axum` HTTP server in a new `codemate-server` crate
+2. [ ] Implement JSON REST endpoints for indexing and search
+3. [ ] Implement MCP (Model Context Protocol) server for Claude integration
+4. [ ] Implement similarity-based graph traversal queries
+5. [ ] Integrate with external symbol databases (optional/P2)
 
 ---
 

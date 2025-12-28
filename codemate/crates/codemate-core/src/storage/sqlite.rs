@@ -4,8 +4,9 @@ use crate::chunk::{Chunk, ChunkKind, ChunkLocation, Edge, EdgeKind, Language};
 use crate::content_hash::ContentHash;
 use crate::error::Result;
 use crate::storage::traits::{
-    ChunkStore, Embedding, GraphStore, LocationStore, SimilarityResult, VectorStore,
+    ChunkStore, Embedding, GraphStore, LocationStore, QueryStore, SimilarityResult, VectorStore,
 };
+use crate::query::SearchQuery;
 use async_trait::async_trait;
 use rusqlite::{params, Connection};
 use std::path::Path;
@@ -102,6 +103,15 @@ impl SqliteStorage {
 
             CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source_hash);
             CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target_query);
+
+            -- FTS5 table for full-text search
+            CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+                content_hash UNINDEXED,
+                symbol_name,
+                docstring,
+                content,
+                tokenize='unicode61'
+            );
             "#,
         )?;
         Ok(())
@@ -132,6 +142,21 @@ impl ChunkStore for SqliteStorage {
                 chunk.line_count as i64,
             ],
         )?;
+
+        // Update FTS5 index
+        conn.execute(
+            r#"
+            INSERT OR REPLACE INTO chunks_fts (content_hash, symbol_name, docstring, content)
+            VALUES (?1, ?2, ?3, ?4)
+            "#,
+            params![
+                chunk.content_hash.to_hex(),
+                chunk.symbol_name,
+                chunk.docstring,
+                chunk.content,
+            ],
+        )?;
+
         Ok(chunk.content_hash.clone())
     }
 
@@ -215,6 +240,43 @@ impl ChunkStore for SqliteStorage {
         let conn = self.conn.lock().unwrap();
         let count: i64 = conn.query_row("SELECT COUNT(*) FROM chunks", [], |row| row.get(0))?;
         Ok(count as usize)
+    }
+
+    async fn find_by_symbol(&self, symbol_name: &str) -> Result<Vec<Chunk>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT content_hash, content, language, chunk_kind, symbol_name, signature, docstring FROM chunks WHERE symbol_name = ?1"
+        )?;
+
+        let chunks = stmt.query_map(params![symbol_name], |row| {
+            let hash_str: String = row.get(0)?;
+            let content: String = row.get(1)?;
+            let lang_str: String = row.get(2)?;
+            let kind_str: String = row.get(3)?;
+            let symbol_name: Option<String> = row.get(4)?;
+            let signature: Option<String> = row.get(5)?;
+            let docstring: Option<String> = row.get(6)?;
+
+            let line_count = content.lines().count();
+
+            Ok(Chunk {
+                content_hash: ContentHash::from_hex(&hash_str).unwrap(),
+                content,
+                language: Language::from_str(&lang_str),
+                kind: serde_json::from_str(&format!("\"{}\"", kind_str)).unwrap_or(ChunkKind::Block),
+                symbol_name,
+                signature,
+                docstring,
+                byte_size: 0,
+                line_start: 0,
+                line_end: 0,
+                line_count,
+            })
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+
+        Ok(chunks)
     }
 }
 
@@ -561,6 +623,159 @@ impl GraphStore for SqliteStorage {
         .collect();
 
         Ok(edges)
+    }
+
+    async fn get_roots(&self) -> Result<Vec<String>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT DISTINCT symbol_name FROM chunks 
+             WHERE symbol_name IS NOT NULL 
+             AND symbol_name NOT IN (SELECT target_query FROM edges)"
+        )?;
+
+        let roots = stmt.query_map([], |row| row.get(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(roots)
+    }
+}
+
+#[async_trait]
+impl QueryStore for SqliteStorage {
+    async fn query(
+        &self,
+        query: &SearchQuery,
+        embedding: &Embedding,
+    ) -> Result<Vec<SimilarityResult>> {
+        let conn = self.conn.lock().unwrap();
+
+        // 1. Get filtered set of content hashes based on metadata
+        let mut filter_hashes: Option<std::collections::HashSet<String>> = None;
+
+        if query.author.is_some() || query.lang.is_some() || query.after.is_some() || query.before.is_some() || query.file_pattern.is_some() {
+            let mut sql = "SELECT DISTINCT c.content_hash FROM chunks c LEFT JOIN locations l ON c.content_hash = l.content_hash WHERE 1=1".to_string();
+            let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+            if let Some(author) = &query.author {
+                sql.push_str(" AND (l.author LIKE ? OR l.author = ?)");
+                params_vec.push(Box::new(format!("%{}%", author)));
+                params_vec.push(Box::new(author.clone()));
+            }
+
+            if let Some(lang) = &query.lang {
+                sql.push_str(" AND c.language = ?");
+                params_vec.push(Box::new(lang.as_str().to_string()));
+            }
+
+            if let Some(after) = &query.after {
+                sql.push_str(" AND l.timestamp >= ?");
+                params_vec.push(Box::new(after.to_rfc3339()));
+            }
+
+            if let Some(before) = &query.before {
+                sql.push_str(" AND l.timestamp <= ?");
+                params_vec.push(Box::new(before.to_rfc3339()));
+            }
+
+            if let Some(pattern) = &query.file_pattern {
+                sql.push_str(" AND l.file_path LIKE ?");
+                params_vec.push(Box::new(format!("%{}%", pattern)));
+            }
+
+            let mut stmt = conn.prepare(&sql)?;
+            let hashes_iter = stmt.query_map(rusqlite::params_from_iter(params_vec.iter()), |row| {
+                row.get::<_, String>(0)
+            })?;
+
+            let mut hashes = std::collections::HashSet::new();
+            for hash in hashes_iter {
+                hashes.insert(hash?);
+            }
+            filter_hashes = Some(hashes);
+        }
+
+        // 2. Perform Vector Search (Filter by metadata hashes if present)
+        let mut vector_stmt = conn.prepare("SELECT content_hash, vector FROM embeddings")?;
+        let vector_results: Vec<(String, f32)> = vector_stmt
+            .query_map([], |row| {
+                let hash_str: String = row.get(0)?;
+                let vector_bytes: Vec<u8> = row.get(1)?;
+                
+                let other_vector: Vec<f32> = vector_bytes
+                    .chunks_exact(4)
+                    .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+                    .collect();
+
+                let similarity = embedding.cosine_similarity(&Embedding {
+                    vector: other_vector,
+                    model_id: String::new(),
+                    dimensions: embedding.dimensions,
+                });
+
+                Ok((hash_str, similarity))
+            })?
+            .filter_map(|r| r.ok())
+            .filter(|(hash, _)| {
+                if let Some(hashes) = &filter_hashes {
+                    hashes.contains(hash)
+                } else {
+                    true
+                }
+            })
+            .collect();
+
+        // 3. Perform FTS5 Search
+        let mut lexical_results = Vec::new();
+        if !query.raw_query.is_empty() {
+            let mut fts_stmt = conn.prepare(
+                "SELECT content_hash, rank FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY rank LIMIT 100"
+            )?;
+            let fts_iter = fts_stmt.query_map(params![query.raw_query], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
+            })?;
+
+            for res in fts_iter {
+                if let Ok((hash, rank)) = res {
+                    if filter_hashes.as_ref().map_or(true, |h| h.contains(&hash)) {
+                        lexical_results.push((hash, rank));
+                    }
+                }
+            }
+        }
+
+        // 4. Reciprocal Rank Fusion (RRF)
+        let mut rrf_scores: std::collections::HashMap<String, f32> = std::collections::HashMap::new();
+        let k = 60.0;
+
+        // Rank Vector Results
+        let mut vector_sorted = vector_results;
+        vector_sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        for (i, (hash, _)) in vector_sorted.iter().enumerate() {
+            let score = 1.0 / (k + (i + 1) as f32);
+            *rrf_scores.entry(hash.clone()).or_insert(0.0) += score;
+        }
+
+        // Rank Lexical Results (FTS5 rank is smaller -> better match)
+        for (i, (hash, _)) in lexical_results.iter().enumerate() {
+            let score = 1.0 / (k + (i + 1) as f32);
+            *rrf_scores.entry(hash.clone()).or_insert(0.0) += score;
+        }
+
+        let mut final_results: Vec<SimilarityResult> = rrf_scores
+            .into_iter()
+            .map(|(hash, score)| {
+                SimilarityResult {
+                    content_hash: crate::ContentHash::from_hex(&hash).unwrap(),
+                    similarity: score, // This is now an RRF score, not cosine similarity
+                }
+            })
+            .collect();
+
+        final_results.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap());
+        final_results.truncate(query.limit);
+
+        Ok(final_results)
     }
 }
 

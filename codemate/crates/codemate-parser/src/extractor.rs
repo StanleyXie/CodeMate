@@ -496,18 +496,13 @@ impl ChunkExtractor {
                     };
 
                     let symbol_name = self.get_hcl_resource_name(node, content);
-                    let text = node.utf8_text(content.as_bytes()).ok();
                     
-                    if let Some(text) = text {
-                        let line_count = text.lines().count();
-                        if line_count <= self.max_lines {
-                            chunks.push(Chunk::new(
-                                text.to_string(),
-                                Language::Hcl,
-                                kind,
-                                symbol_name,
-                            ));
-                        }
+                    if let Some(chunk) = self.node_to_chunk(node, content, Language::Hcl, kind) {
+                        let mut chunk_with_name = chunk;
+                        chunk_with_name.symbol_name = symbol_name;
+                        
+                        self.extract_hcl_edges(node, content, &chunk_with_name, edges);
+                        chunks.push(chunk_with_name);
                     }
                 }
             }
@@ -517,6 +512,64 @@ impl ChunkExtractor {
                     self.extract_hcl_nodes(&child, content, chunks, edges);
                 }
             }
+        }
+    }
+
+    fn extract_hcl_edges(
+        &self,
+        node: &tree_sitter::Node,
+        content: &str,
+        source_chunk: &Chunk,
+        edges: &mut Vec<Edge>,
+    ) {
+        match node.kind() {
+            "variable_expr" => {
+                // Determine the full reference name (e.g., aws_instance.web or var.region)
+                let mut parts = Vec::new();
+                if let Ok(text) = node.utf8_text(content.as_bytes()) {
+                    parts.push(text.to_string());
+                }
+
+                // Look for subsequent get_attr components
+                let mut current = node.next_sibling();
+                while let Some(sibling) = current {
+                    if sibling.kind() == "get_attr" {
+                        if let Some(attr_id) = sibling.child_by_field_name("name") {
+                             if let Ok(text) = attr_id.utf8_text(content.as_bytes()) {
+                                 parts.push(text.to_string());
+                             }
+                        } else {
+                            // Fallback if child_by_field_name doesn't work as expected
+                            if let Ok(text) = sibling.utf8_text(content.as_bytes()) {
+                                parts.push(text.trim_start_matches('.').to_string());
+                            }
+                        }
+                        current = sibling.next_sibling();
+                    } else {
+                        break;
+                    }
+                }
+
+                if parts.len() >= 2 {
+                    let target = parts[0..2].join(".");
+                    // Avoid self-references if possible (simple heuristic)
+                    if Some(&target) != source_chunk.symbol_name.as_ref() {
+                        edges.push(Edge {
+                            source_hash: source_chunk.content_hash.clone(),
+                            target_query: target,
+                            kind: EdgeKind::Calls,
+                            line_number: Some(node.start_position().row + 1),
+                        });
+                    }
+                }
+            }
+            "config_file" | "block" | "body" | "attribute" | "expression" | "get_attr" | "literal_value" | "object" | "tuple" => {
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    self.extract_hcl_edges(&child, content, source_chunk, edges);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -573,7 +626,7 @@ fn goodbye() {
 }
 "#;
         let extractor = ChunkExtractor::new();
-        let chunks = extractor.extract(content, Language::Rust).unwrap();
+        let (chunks, _) = extractor.extract(content, Language::Rust).unwrap();
         
         assert_eq!(chunks.len(), 2);
         assert_eq!(chunks[0].symbol_name, Some("hello".to_string()));
@@ -589,7 +642,7 @@ pub struct User {
 }
 "#;
         let extractor = ChunkExtractor::new();
-        let chunks = extractor.extract(content, Language::Rust).unwrap();
+        let (chunks, _) = extractor.extract(content, Language::Rust).unwrap();
         
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks[0].kind, ChunkKind::Struct);
@@ -610,7 +663,7 @@ func goodbye() {
 }
 "#;
         let extractor = ChunkExtractor::new();
-        let chunks = extractor.extract(content, Language::Go).unwrap();
+        let (chunks, _) = extractor.extract(content, Language::Go).unwrap();
         
         assert_eq!(chunks.len(), 2);
         assert_eq!(chunks[0].symbol_name, Some("hello".to_string()));
@@ -635,7 +688,7 @@ output "instance_ip" {
 }
 "#;
         let extractor = ChunkExtractor::new();
-        let chunks = extractor.extract(content, Language::Hcl).unwrap();
+        let (chunks, _) = extractor.extract(content, Language::Hcl).unwrap();
         
         assert_eq!(chunks.len(), 3);
         

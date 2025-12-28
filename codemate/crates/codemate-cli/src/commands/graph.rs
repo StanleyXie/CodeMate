@@ -93,3 +93,117 @@ pub async fn run_deps(file_path: String, database: PathBuf) -> Result<()> {
 
     Ok(())
 }
+pub async fn run_tree(symbol: Option<String>, all: bool, database: PathBuf, depth: usize) -> Result<()> {
+    // Initialize storage
+    let storage = SqliteStorage::new(&database)?;
+
+    let targets = if all || symbol.is_none() {
+        println!("{} Building full dependency forest...", "→".blue());
+        let roots = storage.get_roots().await?;
+        if roots.is_empty() {
+            println!("{} No entry points (roots) found in index.", "⚠".yellow());
+            return Ok(());
+        }
+        roots
+    } else if let Some(sym) = symbol {
+        println!("{} Building dependency tree for: {}", "→".blue(), sym.bold());
+        
+        // Check if the starting symbol exists
+        let chunks = storage.find_by_symbol(&sym).await?;
+        if chunks.is_empty() {
+            println!("{} Symbol not found in index: {}", "⚠".yellow(), sym.bold());
+            println!("   Make sure you have indexed the files and are using the correct database.");
+            return Ok(());
+        }
+        vec![sym]
+    } else {
+        return Ok(());
+    };
+
+    // Start recursion for each target
+    let mut visited = std::collections::HashSet::new();
+    for target in targets {
+        render_tree_recursive(&storage, &target, "", true, 0, depth, &mut visited).await?;
+        if all {
+            println!(); // Spacing between trees in a forest
+        }
+    }
+
+    Ok(())
+}
+
+#[async_recursion::async_recursion]
+async fn render_tree_recursive(
+    storage: &SqliteStorage,
+    symbol: &str,
+    prefix: &str,
+    is_last: bool,
+    current_depth: usize,
+    max_depth: usize,
+    visited: &mut std::collections::HashSet<String>,
+) -> Result<()> {
+    if current_depth > max_depth {
+        return Ok(());
+    }
+
+    // Print current node
+    let connector = if current_depth == 0 {
+        ""
+    } else if is_last {
+        "└── "
+    } else {
+        "├── "
+    };
+
+    println!("{}{}{}", prefix, connector, symbol.bold());
+
+    // Check for cycles
+    if visited.contains(symbol) {
+        println!("{}   {}(cycle detected)", prefix, if is_last { " " } else { "│  " });
+        return Ok(());
+    }
+    visited.insert(symbol.to_string());
+
+    // Find the chunk for this symbol to get outgoing edges
+    let chunks = storage.find_by_symbol(symbol).await?;
+    if chunks.is_empty() {
+        return Ok(());
+    }
+
+    // Collect all outgoing edges from all chunks with this symbol name
+    let mut all_deps = Vec::new();
+    for chunk in chunks {
+        let edges = storage.get_outgoing_edges(&chunk.content_hash).await?;
+        for edge in edges {
+            all_deps.push(edge.target_query);
+        }
+    }
+
+    // Sort and dedup dependencies
+    all_deps.sort();
+    all_deps.dedup();
+
+    let new_prefix = if current_depth == 0 {
+        ""
+    } else if is_last {
+        &format!("{}    ", prefix)
+    } else {
+        &format!("{}│   ", prefix)
+    };
+
+    let count = all_deps.len();
+    for (i, dep) in all_deps.into_iter().enumerate() {
+        let is_last_child = i == count - 1;
+        render_tree_recursive(
+            storage,
+            &dep,
+            new_prefix,
+            is_last_child,
+            current_depth + 1,
+            max_depth,
+            visited,
+        ).await?;
+    }
+
+    Ok(())
+}

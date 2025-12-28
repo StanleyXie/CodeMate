@@ -103,6 +103,19 @@ pub enum GraphSubcommand {
         /// File path to find dependencies for
         file_path: String,
     },
+    /// Visualize recursive dependency tree
+    Tree {
+        /// Symbol name to start the tree from
+        symbol: Option<String>,
+
+        /// Visualize the entire dependency forest (all entry points)
+        #[arg(short, long)]
+        all: bool,
+
+        /// Maximum recursion depth
+        #[arg(short, long, default_value = "3")]
+        depth: usize,
+    },
 }
 
 #[tokio::main]
@@ -145,6 +158,9 @@ async fn main() -> Result<()> {
                 }
                 GraphSubcommand::Deps { file_path } => {
                     commands::graph::run_deps(file_path, database).await?;
+                }
+                GraphSubcommand::Tree { symbol, all, depth } => {
+                    commands::graph::run_tree(symbol, all, database, depth).await?;
                 }
             }
         }

@@ -1,6 +1,6 @@
 //! Storage trait definitions.
 
-use crate::{Chunk, ChunkLocation, ContentHash, Edge, Result};
+use crate::{Chunk, ChunkLocation, ContentHash, Edge, Result, SearchQuery};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
@@ -76,6 +76,9 @@ pub trait ChunkStore: Send + Sync {
 
     /// Count total chunks.
     async fn count(&self) -> Result<usize>;
+
+    /// Find chunks by symbol name.
+    async fn find_by_symbol(&self, symbol_name: &str) -> Result<Vec<Chunk>>;
 }
 
 /// Vector storage and similarity search trait.
@@ -113,6 +116,9 @@ pub trait GraphStore: Send + Sync {
 
     /// Get incoming edges for a target query.
     async fn get_incoming_edges(&self, target_query: &str) -> Result<Vec<Edge>>;
+
+    /// Get all root symbols (those with no incoming edges).
+    async fn get_roots(&self) -> Result<Vec<String>>;
 }
 
 /// Location storage trait for tracking chunk locations across commits.
@@ -132,6 +138,17 @@ pub trait LocationStore: Send + Sync {
 
     /// Get location history for a chunk (all commits where it appeared).
     async fn get_location_history(&self, content_hash: &ContentHash) -> Result<Vec<ChunkLocation>>;
+}
+
+/// Unified query storage trait for hybrid and filtered search.
+#[async_trait]
+pub trait QueryStore: Send + Sync {
+    /// Perform a filtered, hybrid search.
+    async fn query(
+        &self,
+        query: &SearchQuery,
+        embedding: &Embedding,
+    ) -> Result<Vec<SimilarityResult>>;
 }
 
 #[cfg(test)]

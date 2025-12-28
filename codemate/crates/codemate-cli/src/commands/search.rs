@@ -1,13 +1,14 @@
 //! Search command implementation.
 
 use anyhow::Result;
-use codemate_core::storage::{ChunkStore, SqliteStorage, VectorStore};
+use codemate_core::storage::{ChunkStore, QueryStore, SqliteStorage};
+use codemate_core::SearchQuery;
 use codemate_embeddings::EmbeddingGenerator;
 use colored::Colorize;
 use std::path::PathBuf;
 
 /// Run the search command.
-pub async fn run(query: String, database: PathBuf, limit: usize, threshold: f32) -> Result<()> {
+pub async fn run(query_str: String, database: PathBuf, limit: usize, _threshold: f32) -> Result<()> {
     // Check if database exists
     if !database.exists() {
         eprintln!(
@@ -19,7 +20,19 @@ pub async fn run(query: String, database: PathBuf, limit: usize, threshold: f32)
         return Ok(());
     }
 
-    println!("{} Searching for: {}", "→".blue(), query.yellow());
+    // Parse Query DSL
+    let mut query = SearchQuery::parse(&query_str);
+    if limit > 0 {
+        query.limit = limit;
+    }
+
+    println!("{} Searching for: {}", "→".blue(), query.raw_query.yellow());
+    if let Some(ref author) = query.author {
+        println!("  {} author: {}", "•".dimmed(), author.cyan());
+    }
+    if let Some(ref lang) = query.lang {
+        println!("  {} lang: {}", "•".dimmed(), lang.as_str().cyan());
+    }
     println!();
 
     // Initialize storage
@@ -28,11 +41,11 @@ pub async fn run(query: String, database: PathBuf, limit: usize, threshold: f32)
     // Initialize embeddings
     let mut embedder = EmbeddingGenerator::new()?;
     
-    // Generate query embedding
-    let query_embedding = embedder.embed(&query)?;
+    // Generate query embedding (using the semantic part of the query)
+    let query_embedding = embedder.embed(&query.raw_query)?;
     
-    // Search
-    let results = storage.search(&query_embedding, limit, threshold).await?;
+    // Search using Unified Query Store
+    let results = storage.query(&query, &query_embedding).await?;
     
     if results.is_empty() {
         println!("{} No results found.", "→".yellow());
@@ -47,13 +60,11 @@ pub async fn run(query: String, database: PathBuf, limit: usize, threshold: f32)
         let chunk = ChunkStore::get(&storage, &result.content_hash).await?;
         
         if let Some(chunk) = chunk {
-            let similarity_pct = (result.similarity * 100.0) as u32;
-            
             // Header
             println!(
                 "{} {}",
                 format!("[{}]", i + 1).blue(),
-                format!("{}% match", similarity_pct).green()
+                format!("score: {:.4}", result.similarity).green()
             );
             
             // Symbol name if available

@@ -18,18 +18,23 @@ pub enum Language {
 }
 
 impl Language {
-    /// Detect language from file extension.
-    pub fn from_extension(ext: &str) -> Self {
-        match ext.to_lowercase().as_str() {
-            "rs" => Language::Rust,
-            "py" | "pyi" => Language::Python,
-            "ts" | "tsx" => Language::TypeScript,
-            "js" | "jsx" | "mjs" => Language::JavaScript,
-            "go" => Language::Go,
+    /// Detect language from file extension or name.
+    pub fn from_str(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "rs" | "rust" => Language::Rust,
+            "py" | "pyi" | "python" => Language::Python,
+            "ts" | "tsx" | "typescript" => Language::TypeScript,
+            "js" | "jsx" | "mjs" | "javascript" => Language::JavaScript,
+            "go" | "golang" => Language::Go,
             "java" => Language::Java,
-            "tf" | "tfvars" | "hcl" => Language::Hcl,
+            "tf" | "tfvars" | "hcl" | "terraform" => Language::Hcl,
             _ => Language::Unknown,
         }
+    }
+
+    /// Detect language from file extension.
+    pub fn from_extension(ext: &str) -> Self {
+        Self::from_str(ext)
     }
 
     /// Get the language name as a string.

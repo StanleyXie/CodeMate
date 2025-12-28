@@ -44,6 +44,9 @@ hex = "0.4"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
+# Utilities
+chrono = { version = "0.4", features = ["serde"] }
+
 # Internal crates
 codemate-core = { path = "crates/codemate-core" }
 codemate-parser = { path = "crates/codemate-parser" }

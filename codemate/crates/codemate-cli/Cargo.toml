@@ -23,4 +23,5 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 walkdir = "2.4"
 chrono = "0.4"
+async-recursion = "1.1"
 
