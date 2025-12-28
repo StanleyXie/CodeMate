@@ -5,6 +5,7 @@
 pub mod chunk;
 pub mod content_hash;
 pub mod error;
+pub mod service;
 pub mod storage;
 pub mod query;
 

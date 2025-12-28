@@ -1,7 +1,7 @@
 //! Index command implementation.
 
 use anyhow::Result;
-use codemate_core::storage::{ChunkStore, GraphStore, LocationStore, SqliteStorage, VectorStore};
+use codemate_core::storage::{ChunkStore, Embedder, GraphStore, LocationStore, SqliteStorage, VectorStore};
 use codemate_core::ChunkLocation;
 use codemate_embeddings::EmbeddingGenerator;
 use codemate_parser::ChunkExtractor;

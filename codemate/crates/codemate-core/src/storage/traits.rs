@@ -51,7 +51,7 @@ impl Embedding {
 }
 
 /// Result of a similarity search.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimilarityResult {
     /// Content hash of the similar chunk
     pub content_hash: ContentHash,
@@ -149,6 +149,15 @@ pub trait QueryStore: Send + Sync {
         query: &SearchQuery,
         embedding: &Embedding,
     ) -> Result<Vec<SimilarityResult>>;
+}
+
+/// Trait for generating text embeddings.
+pub trait Embedder: Send + Sync {
+    /// Generate embedding for a single text.
+    fn embed(&self, text: &str) -> Result<Embedding>;
+    
+    /// Generate embeddings for multiple texts.
+    fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Embedding>>;
 }
 
 #[cfg(test)]

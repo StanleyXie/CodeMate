@@ -1,7 +1,7 @@
 //! Search command implementation.
 
 use anyhow::Result;
-use codemate_core::storage::{ChunkStore, QueryStore, SqliteStorage};
+use codemate_core::storage::{ChunkStore, Embedder, QueryStore, SqliteStorage};
 use codemate_core::SearchQuery;
 use codemate_embeddings::EmbeddingGenerator;
 use colored::Colorize;
