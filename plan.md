@@ -14,9 +14,10 @@
 | Sprint 2 | Git-Native Indexing | 100% | ✅ Complete |
 | Sprint 3 | Graph Index | 100% | ✅ Complete |
 | Sprint 4 | Query Layer | 100% | ✅ Complete |
-| Sprint 5 | External Interfaces | 0% | ⏳ Pending |
+| Sprint 5 | External Interfaces | 100% | ✅ Complete |
+| Sprint 6 | Module-Level Dependencies | 0% | ⏳ In Progress |
 
-**Overall Progress**: 80% (Query Layer and Graph Visualization Complete)
+**Overall Progress**: 95% (External Interfaces Complete, Module Dependencies In Progress)
 
 ---
 
@@ -158,10 +159,49 @@ codemate/
 
 | Feature | Description | Priority |
 |---------|-------------|----------|
-| HTTP API | axum server with JSON endpoints | P0 |
-| MCP server | Claude Code integration via rmcp | P0 |
+| HTTP API | axum server with JSON endpoints | P0 ✅ |
+| MCP server | Claude Code integration via rmcp | P0 ✅ |
+| Unified Service Layer | `CodeMateService` trait abstraction | P0 ✅ |
+| Tree Graph Optimizations | Language colors, truncation, alignment | P1 ✅ |
 | Similarity queries | Per PRD-similarity-edges | P1 |
 | External symbols | Per PRD-external-symbol-database | P2 |
+
+---
+
+## Sprint 6: Module-Level Dependencies
+
+**Goal**: Detect project/module structure and visualize high-level dependencies.
+
+**Duration**: 3 weeks  
+**Status**: In Progress (Phase 1)
+
+### Deliverables
+
+| Feature | Description | Priority | Phase |
+|---------|-------------|----------|-------|
+| Module detection | Detect Cargo.toml, package.json, etc. | P0 | 1 |
+| Schema changes | Add `modules` table, `module_id` column | P0 | 1 |
+| Chunk association | Link chunks to containing modules | P0 | 1 |
+| CLI `graph modules` | Module-level dependency tree | P0 | 2 |
+| Module edges | Aggregated cross-module dependencies | P0 | 2 |
+| REST/MCP endpoints | API access to module graph | P1 | 2 |
+| DOT/Graphviz export | Visualization output format | P1 | 3 |
+| JSON output | Programmatic access | P1 | 3 |
+
+### Phase 1 Tasks (Complete ✅)
+
+- [x] Add `modules` table to SQLite schema
+- [x] Add `module_id` column to chunks table
+- [x] Implement project marker detection (Cargo.toml, package.json, etc.)
+- [x] Create `ModuleStore` trait and SqliteStorage implementation
+- [x] Update existing tests
+- [x] Create test script: `scripts/test_module_detection.py`
+
+
+### References
+
+- [PRD: Module-Level Dependencies](design/decision/PRD-module-level-dependencies.md)
+- [Discussion](design/draft/discussion-module-level-dependencies.md)
 
 ---
 
@@ -204,13 +244,13 @@ codemate/
 
 ---
 
-## Next Actions (Sprint 5)
+## Next Actions (Sprint 6 - Phase 1)
 
-1. [ ] Set up `axum` HTTP server in a new `codemate-server` crate
-2. [ ] Implement JSON REST endpoints for indexing and search
-3. [ ] Implement MCP (Model Context Protocol) server for Claude integration
-4. [ ] Implement similarity-based graph traversal queries
-5. [ ] Integrate with external symbol databases (optional/P2)
+1. [ ] Add `modules` table to SQLite schema in `codemate-core`
+2. [ ] Add `module_id` column to chunks table
+3. [ ] Implement `ProjectDetector` for Cargo.toml, package.json detection
+4. [ ] Update `ChunkExtractor` to associate chunks with modules
+5. [ ] Add `graph modules` CLI subcommand
 
 ---
 
@@ -223,3 +263,4 @@ codemate/
 - [PRD: Edge Versioning](design/decision/PRD-edge-versioning.md)
 - [PRD: Similarity Edges](design/decision/PRD-similarity-edges.md)
 - [PRD: External Symbol Database](design/decision/PRD-external-symbol-database.md)
+- [PRD: Module-Level Dependencies](design/decision/PRD-module-level-dependencies.md)

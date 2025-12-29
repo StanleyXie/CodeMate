@@ -1,8 +1,8 @@
 //! Index command implementation.
 
 use anyhow::Result;
-use codemate_core::storage::{ChunkStore, GraphStore, LocationStore, SqliteStorage, VectorStore};
-use codemate_core::ChunkLocation;
+use codemate_core::storage::{ChunkStore, Embedder, GraphStore, LocationStore, ModuleStore, SqliteStorage, VectorStore};
+use codemate_core::{ChunkLocation, ProjectDetector};
 use codemate_embeddings::EmbeddingGenerator;
 use codemate_parser::ChunkExtractor;
 use colored::Colorize;
@@ -33,6 +33,15 @@ async fn run_simple(path: &PathBuf, database: &PathBuf) -> Result<()> {
     // Initialize parser
     let extractor = ChunkExtractor::new();
     
+    // Detect modules
+    println!("{} Detecting modules...", "→".blue());
+    let mut detector = ProjectDetector::new(path.as_path());
+    let modules = detector.detect_modules();
+    for module in &modules {
+        ModuleStore::put_module(&storage, module).await?;
+    }
+    println!("  Found {} modules", modules.len());
+
     // Initialize embeddings (lazy - created on first use)
     println!("{} Loading embedding model...", "→".blue());
     let mut embedder = EmbeddingGenerator::new()?;
@@ -80,6 +89,9 @@ async fn run_simple(path: &PathBuf, database: &PathBuf) -> Result<()> {
             }
         };
 
+        // Find containing module
+        let module_id = detector.get_module_id_for_file(file_path);
+
         // Get relative path for location tracking
         let relative_path = file_path.strip_prefix(path)
             .unwrap_or(file_path)
@@ -88,8 +100,15 @@ async fn run_simple(path: &PathBuf, database: &PathBuf) -> Result<()> {
 
         // Store chunks and embeddings
         for chunk in &chunks {
+            // Link to module
+            let chunk = if let Some(ref mid) = module_id {
+                chunk.clone().with_module_id(mid.clone())
+            } else {
+                chunk.clone()
+            };
+
             // Store chunk
-            ChunkStore::put(&storage, chunk).await?;
+            ChunkStore::put(&storage, &chunk).await?;
             
             // Generate and store embedding
             let embedding_text = format!(
@@ -178,6 +197,15 @@ async fn run_git_aware(path: &PathBuf, database: &PathBuf) -> Result<()> {
     // Initialize parser
     let extractor = ChunkExtractor::new();
     
+    // Detect modules
+    println!("{} Detecting modules...", "→".blue());
+    let mut detector = ProjectDetector::new(path.as_path());
+    let modules = detector.detect_modules();
+    for module in &modules {
+        ModuleStore::put_module(&storage, module).await?;
+    }
+    println!("  Found {} modules", modules.len());
+
     // Initialize embeddings
     println!("{} Loading embedding model...", "→".blue());
     let mut embedder = EmbeddingGenerator::new()?;
@@ -231,10 +259,20 @@ async fn run_git_aware(path: &PathBuf, database: &PathBuf) -> Result<()> {
             }
         };
 
+        // Find containing module
+        let module_id = detector.get_module_id_for_file(&file_path);
+
         // Store chunks with location info
         for chunk in &chunks {
+            // Link to module
+            let chunk = if let Some(ref mid) = module_id {
+                chunk.clone().with_module_id(mid.clone())
+            } else {
+                chunk.clone()
+            };
+
             // Store chunk
-            ChunkStore::put(&storage, chunk).await?;
+            ChunkStore::put(&storage, &chunk).await?;
             
             // Generate and store embedding
             let embedding_text = format!(

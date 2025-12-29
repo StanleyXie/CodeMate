@@ -1,6 +1,6 @@
 //! Storage trait definitions.
 
-use crate::{Chunk, ChunkLocation, ContentHash, Edge, Result, SearchQuery};
+use crate::{Chunk, ChunkLocation, ContentHash, Edge, Module, Result, SearchQuery};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
@@ -51,7 +51,7 @@ impl Embedding {
 }
 
 /// Result of a similarity search.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimilarityResult {
     /// Content hash of the similar chunk
     pub content_hash: ContentHash,
@@ -149,6 +149,38 @@ pub trait QueryStore: Send + Sync {
         query: &SearchQuery,
         embedding: &Embedding,
     ) -> Result<Vec<SimilarityResult>>;
+}
+
+/// Module storage trait for project/crate detection.
+#[async_trait]
+pub trait ModuleStore: Send + Sync {
+    /// Store a module.
+    async fn put_module(&self, module: &Module) -> Result<()>;
+
+    /// Get a module by ID.
+    async fn get_module(&self, id: &str) -> Result<Option<Module>>;
+
+    /// Get all modules.
+    async fn get_all_modules(&self) -> Result<Vec<Module>>;
+
+    /// Get child modules of a parent.
+    async fn get_child_modules(&self, parent_id: &str) -> Result<Vec<Module>>;
+
+    /// Get module dependencies (aggregated from chunk edges).
+    async fn get_module_dependencies(&self, module_id: &str) -> Result<Vec<(String, usize)>>;
+
+    /// Get a unified graph (module or symbol level) with optional filtering.
+    async fn get_unified_graph(&self, level: &str, filter_ids: Option<Vec<String>>, include_edges: bool) -> anyhow::Result<Vec<(Module, Vec<(String, usize, Option<Vec<(String, String)>>)>)>>;
+}
+
+
+/// Trait for generating text embeddings.
+pub trait Embedder: Send + Sync {
+    /// Generate embedding for a single text.
+    fn embed(&self, text: &str) -> Result<Embedding>;
+    
+    /// Generate embeddings for multiple texts.
+    fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Embedding>>;
 }
 
 #[cfg(test)]

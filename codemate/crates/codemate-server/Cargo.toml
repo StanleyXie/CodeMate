@@ -1,0 +1,28 @@
+[package]
+name = "codemate-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+codemate-core.workspace = true
+codemate-parser.workspace = true
+codemate-embeddings.workspace = true
+tokio.workspace = true
+axum.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+futures.workspace = true
+clap.workspace = true
+tracing-subscriber.workspace = true
+async-recursion = "1.1"
+walkdir = "2.4"
+async-trait = "0.1"
+mcp_rust_sdk.workspace = true

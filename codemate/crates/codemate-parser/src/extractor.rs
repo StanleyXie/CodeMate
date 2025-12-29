@@ -109,23 +109,8 @@ impl ChunkExtractor {
                 }
             }
             "use_declaration" => {
-                let mut cursor = node.walk();
-                for child in node.children(&mut cursor) {
-                    if child.kind() == "use_path" {
-                        if let Ok(text) = child.utf8_text(content.as_bytes()) {
-                            edges.push(Edge::new(
-                                // For file-level imports, we don't have a source chunk yet
-                                // so we'll associate it with a dummy "file" chunk or similar if needed.
-                                // Actually, let's just stick to function-level calls for now
-                                // or find a way to associate with the module/file chunk.
-                                // If chunks is empty, it's a file header import.
-                                ContentHash::from_content(content.as_bytes()),
-                                text.to_string(),
-                                EdgeKind::Imports,
-                            ).with_line(child.start_position().row + 1));
-                        }
-                    }
-                }
+                // File-level imports don't have a source chunk, so we skip edge creation.
+                // These would need to be associated with a file-level chunk if we want to track them.
             }
             "call_expression" => {
                 // If we are inside a function, we'll handle this in extract_rust_edges
@@ -244,13 +229,8 @@ impl ChunkExtractor {
                 }
             }
             "import_statement" | "import_from_statement" => {
-                if let Ok(text) = node.utf8_text(content.as_bytes()) {
-                     edges.push(Edge::new(
-                        ContentHash::from_content(content.as_bytes()),
-                        text.trim().to_string(),
-                        EdgeKind::Imports,
-                    ).with_line(node.start_position().row + 1));
-                }
+                // File-level imports don't have a source chunk, so we skip edge creation.
+                // These would need to be associated with a file-level chunk if we want to track them.
             }
             _ => {
                 let mut cursor = node.walk();

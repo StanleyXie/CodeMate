@@ -2,13 +2,42 @@
 //!
 //! Generate embeddings for code chunks using fastembed.
 
-use codemate_core::storage::Embedding;
+use std::sync::Mutex;
+use codemate_core::storage::{Embedding, Embedder};
 use codemate_core::Result;
 
 /// Embedding generator using fastembed.
 pub struct EmbeddingGenerator {
-    model: fastembed::TextEmbedding,
+    model: Mutex<fastembed::TextEmbedding>,
     model_id: String,
+}
+
+impl Embedder for EmbeddingGenerator {
+    fn embed(&self, text: &str) -> Result<Embedding> {
+        let mut model = self.model.lock().map_err(|e| codemate_core::Error::Embedding(e.to_string()))?;
+        let embeddings = model
+            .embed(vec![text], None)
+            .map_err(|e| codemate_core::Error::Embedding(e.to_string()))?;
+
+        let vector = embeddings
+            .into_iter()
+            .next()
+            .ok_or_else(|| codemate_core::Error::Embedding("No embedding generated".to_string()))?;
+
+        Ok(Embedding::new(vector, self.model_id.clone()))
+    }
+
+    fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Embedding>> {
+        let mut model = self.model.lock().map_err(|e| codemate_core::Error::Embedding(e.to_string()))?;
+        let embeddings = model
+            .embed(texts.to_vec(), None)
+            .map_err(|e| codemate_core::Error::Embedding(e.to_string()))?;
+
+        Ok(embeddings
+            .into_iter()
+            .map(|vector| Embedding::new(vector, self.model_id.clone()))
+            .collect())
+    }
 }
 
 impl EmbeddingGenerator {
@@ -26,7 +55,7 @@ impl EmbeddingGenerator {
         .map_err(|e| codemate_core::Error::Embedding(e.to_string()))?;
 
         Ok(Self {
-            model,
+            model: Mutex::new(model),
             model_id: model_name.to_string(),
         })
     }
@@ -35,32 +64,15 @@ impl EmbeddingGenerator {
     pub fn model_id(&self) -> &str {
         &self.model_id
     }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    /// Generate embedding for a single text.
-    pub fn embed(&mut self, text: &str) -> Result<Embedding> {
-        let embeddings = self
-            .model
-            .embed(vec![text], None)
-            .map_err(|e| codemate_core::Error::Embedding(e.to_string()))?;
-
-        let vector = embeddings
-            .into_iter()
-            .next()
-            .ok_or_else(|| codemate_core::Error::Embedding("No embedding generated".to_string()))?;
-
-        Ok(Embedding::new(vector, self.model_id.clone()))
-    }
-
-    /// Generate embeddings for multiple texts.
-    pub fn embed_batch(&mut self, texts: &[&str]) -> Result<Vec<Embedding>> {
-        let embeddings = self
-            .model
-            .embed(texts.to_vec(), None)
-            .map_err(|e| codemate_core::Error::Embedding(e.to_string()))?;
-
-        Ok(embeddings
-            .into_iter()
-            .map(|vector| Embedding::new(vector, self.model_id.clone()))
-            .collect())
+    #[test]
+    fn test_initialization() {
+        let mut generator = EmbeddingGenerator::new().expect("Failed to create generator");
+        let embedding = generator.embed("Hello world").expect("Failed to embed text");
+        assert_eq!(embedding.dimensions, 384); // all-MiniLM-L6-v2 dimensions
     }
 }

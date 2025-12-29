@@ -5,7 +5,7 @@ members = [
     "crates/codemate-parser",
     "crates/codemate-embeddings",
     "crates/codemate-git",
-    "crates/codemate-cli",
+    "crates/codemate-cli", "crates/codemate-server",
 ]
 
 [workspace.package]
@@ -20,6 +20,13 @@ repository = "https://github.com/example/codemate"
 # Async runtime
 tokio = { version = "1.35", features = ["full"] }
 async-trait = "0.1"
+futures = "0.3"
+
+# Web server
+axum = "0.7"
+tower = { version = "0.4", features = ["full"] }
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+mcp_rust_sdk = "0.1.1"
 
 # Database
 rusqlite = { version = "0.31", features = ["bundled", "blob"] }

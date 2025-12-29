@@ -1,7 +1,7 @@
 //! Search command implementation.
 
 use anyhow::Result;
-use codemate_core::storage::{ChunkStore, QueryStore, SqliteStorage};
+use codemate_core::storage::{ChunkStore, Embedder, QueryStore, SqliteStorage};
 use codemate_core::SearchQuery;
 use codemate_embeddings::EmbeddingGenerator;
 use colored::Colorize;
@@ -39,7 +39,7 @@ pub async fn run(query_str: String, database: PathBuf, limit: usize, _threshold:
     let storage = SqliteStorage::new(&database)?;
     
     // Initialize embeddings
-    let mut embedder = EmbeddingGenerator::new()?;
+    let embedder = EmbeddingGenerator::new()?;
     
     // Generate query embedding (using the semantic part of the query)
     let query_embedding = embedder.embed(&query.raw_query)?;
