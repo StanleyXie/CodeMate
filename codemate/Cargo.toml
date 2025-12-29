@@ -18,13 +18,13 @@ repository = "https://github.com/example/codemate"
 
 [workspace.dependencies]
 # Async runtime
-tokio = { version = "1.35", features = ["full"] }
+tokio = { version = "1.35", features = ["macros", "rt-multi-thread", "net", "sync", "time"] }
 async-trait = "0.1"
 futures = "0.3"
 
 # Web server
 axum = "0.7"
-tower = { version = "0.4", features = ["full"] }
+# tower = { version = "0.4", features = ["full"] }
 tower-http = { version = "0.5", features = ["cors", "trace"] }
 mcp_rust_sdk = "0.1.1"
 
@@ -52,7 +52,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Utilities
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { version = "0.4", default-features = false, features = ["serde", "std", "clock"] }
 
 # Internal crates
 codemate-core = { path = "crates/codemate-core" }
