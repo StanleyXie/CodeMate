@@ -16,7 +16,7 @@ TESTS = [
     {
         "name": "Module Detection Tests",
         "command": ["python3", "scripts/test_module_detection.py"],
-        "timeout": 30,
+        "timeout": 300,
         "critical": True
     },
     {

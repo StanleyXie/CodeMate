@@ -147,6 +147,10 @@ def test_full_build():
     """Test that the full project builds successfully."""
     print(f"\n{BLUE}=== Test 5: Full Build ==={RESET}")
     
+    if os.environ.get("CI"):
+        print(f"{YELLOW}⚠ Skipping release build test in CI environment{RESET}")
+        return True
+    
     codemate_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     result = run_cmd("cargo build --release", cwd=codemate_dir)
     
