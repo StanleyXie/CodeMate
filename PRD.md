@@ -12,6 +12,7 @@ Path: design/decision
 | [PRD-edge-versioning](design/decision/PRD-edge-versioning.md) | Edge Versioning Strategy | Approved |
 | [PRD-similarity-edges](design/decision/PRD-similarity-edges.md) | Similarity Edges | Approved |
 | [PRD-external-symbol-database](design/decision/PRD-external-symbol-database.md) | External Symbol Database | Approved |
+| [PRD-module-level-dependencies](design/decision/PRD-module-level-dependencies.md) | Module-Level Dependency Analysis | Proposed |
 
 ## Related Discussion Logs
 
@@ -21,6 +22,7 @@ Path: design/decision
 | Edge Versioning | [discussion-edge-versioning.md](design/draft/discussion-edge-versioning.md) |
 | Similarity Edges | [discussion-similarity-edges.md](design/draft/discussion-similarity-edges.md) |
 | External Symbol Database | [discussion-external-symbol-database.md](design/draft/discussion-external-symbol-database.md) |
+| Module-Level Dependencies | [discussion-module-level-dependencies.md](design/draft/discussion-module-level-dependencies.md) |
 
 ## Design Documents
 

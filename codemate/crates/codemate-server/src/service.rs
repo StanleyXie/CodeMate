@@ -3,10 +3,15 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use anyhow::Result;
 
-use codemate_core::service::{CodeMateService, SearchOptions, SearchResult, RelatedResponse};
-use codemate_core::storage::{SqliteStorage, QueryStore, ChunkStore, LocationStore, VectorStore, GraphStore, Embedder};
+use codemate_core::service::{
+    CodeMateService, ModuleDependency, ModuleResponse, RelatedResponse, SearchOptions, SearchResult,
+};
+use codemate_core::storage::{
+    ChunkStore, Embedder, GraphStore, LocationStore, ModuleStore, QueryStore, SqliteStorage, VectorStore,
+};
 use codemate_core::query::SearchQuery;
 use codemate_core::chunk::Chunk;
+use codemate_core::ProjectDetector;
 
 pub struct DefaultCodeMateService {
     storage: Arc<SqliteStorage>,
@@ -122,6 +127,51 @@ impl CodeMateService for DefaultCodeMateService {
             semantic_relatives,
         })
     }
+
+    async fn get_module_graph(&self, level: Option<String>, filter_ids: Option<Vec<String>>, show_edges: bool) -> Result<Vec<ModuleResponse>> {
+        let level = level.unwrap_or_else(|| "crate".to_string());
+        
+        let unified_results = self.storage.get_unified_graph(&level, filter_ids, show_edges).await
+            .map_err(|e| anyhow::anyhow!(e))?;
+        
+        let mut response = Vec::new();
+        for (module, deps_raw) in unified_results {
+            let mut dependencies = Vec::new();
+            for (target_id, count, edges_raw) in deps_raw {
+                let target_name = self.storage.get_module(&target_id).await?
+                    .map(|m| m.name)
+                    .unwrap_or_else(|| target_id.clone());
+                
+                let edges = edges_raw.map(|e_list| {
+                    e_list.into_iter().map(|(src, tgt)| {
+                        codemate_core::service::models::ModuleEdgeDetail {
+                            source_symbol: src,
+                            target_symbol: tgt,
+                        }
+                    }).collect()
+                });
+
+                dependencies.push(ModuleDependency {
+                    target_id,
+                    target_name,
+                    count,
+                    edges,
+                });
+            }
+            
+            response.push(ModuleResponse {
+                module,
+                dependencies,
+            });
+        }
+        
+        Ok(response)
+    }
+
+    async fn find_module_cycles(&self) -> Result<Vec<Vec<String>>> {
+        codemate_core::storage::utils::find_module_cycles(&self.storage).await
+            .map_err(|e| anyhow::anyhow!(e))
+    }
 }
 
 impl DefaultCodeMateService {
@@ -131,6 +181,14 @@ impl DefaultCodeMateService {
         use codemate_core::ChunkLocation;
         
         let extractor = ChunkExtractor::new();
+        
+        // Detect and store modules
+        let mut detector = ProjectDetector::new(&path);
+        let modules = detector.detect_modules();
+        for module in &modules {
+            let _ = storage.put_module(module).await;
+        }
+
         let mut total_files = 0;
         let mut total_chunks = 0;
 
@@ -158,13 +216,23 @@ impl DefaultCodeMateService {
                 Err(_) => continue,
             };
 
+            // Find containing module
+            let module_id = detector.get_module_id_for_file(file_path);
+
             let relative_path = file_path.strip_prefix(&path)
                 .unwrap_or(file_path)
                 .to_string_lossy()
                 .to_string();
 
             for chunk in &chunks {
-                ChunkStore::put(storage, chunk).await
+                // Link to module
+                let chunk = if let Some(ref mid) = module_id {
+                    chunk.clone().with_module_id(mid.clone())
+                } else {
+                    chunk.clone()
+                };
+
+                ChunkStore::put(storage, &chunk).await
                     .map_err(|e| anyhow::anyhow!(e))?;
                 
                 let embedding_text = format!(

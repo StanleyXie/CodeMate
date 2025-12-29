@@ -41,4 +41,13 @@ else
     exit 1
 fi
 
+echo -n "Testing module graph... "
+resp=$(curl -s -X POST $BASE_URL/api/v1/graph/modules -H "Content-Type: application/json" -d '{}')
+if echo $resp | grep -q "modules"; then
+    echo "✓ Module graph successful"
+else
+    echo "✗ Module graph failed: $resp"
+    exit 1
+fi
+
 echo -e "\nAll REST API tests passed!"

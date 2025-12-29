@@ -75,7 +75,20 @@ async fn render_recursive(
     } else {
         ""
     };
-    output.push_str(&format!("{}{}{}\n", prefix, connector, symbol));
+    
+    // Look up language for root symbols
+    let lang_suffix = if current_depth == 0 {
+        let chunks = storage.find_by_symbol(symbol).await?;
+        if let Some(chunk) = chunks.first() {
+            format!(" [{}]", chunk.language.as_str())
+        } else {
+            String::new()
+        }
+    } else {
+        String::new()
+    };
+    
+    output.push_str(&format!("{}{}{}{}\n", prefix, connector, symbol, lang_suffix));
 
     // Cycle detection
     if visited.contains(symbol) {
@@ -114,4 +127,59 @@ async fn render_recursive(
     }
 
     Ok(())
+}
+
+use std::collections::HashMap;
+use crate::storage::ModuleStore;
+
+/// Finds circular dependencies between modules.
+pub async fn find_module_cycles(storage: &SqliteStorage) -> Result<Vec<Vec<String>>> {
+    let modules = storage.get_all_modules().await?;
+    let mut adj = HashMap::new();
+    for module in modules {
+        let deps = storage.get_module_dependencies(&module.id).await?;
+        adj.insert(module.id, deps.into_iter().map(|(id, _)| id).collect::<Vec<_>>());
+    }
+
+    let mut cycles = Vec::new();
+    let mut visited = HashSet::new();
+    let mut on_stack = HashMap::new();
+    let mut path = Vec::new();
+
+    for module_id in adj.keys() {
+        if !visited.contains(module_id) {
+            dfs_find_module_cycles(module_id, &adj, &mut visited, &mut on_stack, &mut path, &mut cycles);
+        }
+    }
+
+    Ok(cycles)
+}
+
+fn dfs_find_module_cycles(
+    u: &str,
+    adj: &HashMap<String, Vec<String>>,
+    visited: &mut HashSet<String>,
+    on_stack: &mut HashMap<String, usize>,
+    path: &mut Vec<String>,
+    cycles: &mut Vec<Vec<String>>,
+) {
+    visited.insert(u.to_string());
+    on_stack.insert(u.to_string(), path.len());
+    path.push(u.to_string());
+
+    if let Some(neighbors) = adj.get(u) {
+        for v in neighbors {
+            if let Some(&start_idx) = on_stack.get(v) {
+                // Cycle detected
+                let mut cycle = path[start_idx..].to_vec();
+                cycle.push(v.clone()); // Close the cycle for display
+                cycles.push(cycle);
+            } else if !visited.contains(v) {
+                dfs_find_module_cycles(v, adj, visited, on_stack, path, cycles);
+            }
+        }
+    }
+
+    on_stack.remove(u);
+    path.pop();
 }

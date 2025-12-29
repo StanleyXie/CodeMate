@@ -107,7 +107,10 @@ pub struct Chunk {
     pub line_end: usize,
     /// Line count
     pub line_count: usize,
+    /// Module ID (for project-level grouping)
+    pub module_id: Option<String>,
 }
+
 
 impl Chunk {
     /// Create a new chunk from content.
@@ -133,8 +136,10 @@ impl Chunk {
             line_start: 0,
             line_end: 0,
             line_count,
+            module_id: None,
         }
     }
+
 
     /// Set the line range.
     pub fn with_line_range(mut self, start: usize, end: usize) -> Self {
@@ -152,6 +157,106 @@ impl Chunk {
     /// Set the docstring.
     pub fn with_docstring(mut self, docstring: String) -> Self {
         self.docstring = Some(docstring);
+        self
+    }
+
+    /// Set the module ID.
+    pub fn with_module_id(mut self, module_id: String) -> Self {
+        self.module_id = Some(module_id);
+        self
+    }
+}
+
+/// Type of project/module for hierarchical organization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProjectType {
+    /// Rust workspace (has [workspace] in Cargo.toml)
+    Workspace,
+    /// Rust crate (has Cargo.toml)
+    Crate,
+    /// Python package (has pyproject.toml or setup.py)
+    Package,
+    /// JavaScript/TypeScript project (has package.json)
+    NpmPackage,
+    /// Go module (has go.mod)
+    GoModule,
+    /// Java project (has pom.xml or build.gradle)
+    JavaProject,
+    /// Terraform root module
+    TerraformModule,
+    /// Generic directory-based module
+    Directory,
+}
+
+impl ProjectType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ProjectType::Workspace => "workspace",
+            ProjectType::Crate => "crate",
+            ProjectType::Package => "package",
+            ProjectType::NpmPackage => "npm_package",
+            ProjectType::GoModule => "go_module",
+            ProjectType::JavaProject => "java_project",
+            ProjectType::TerraformModule => "terraform_module",
+            ProjectType::Directory => "directory",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "workspace" => ProjectType::Workspace,
+            "crate" => ProjectType::Crate,
+            "package" => ProjectType::Package,
+            "npm_package" => ProjectType::NpmPackage,
+            "go_module" => ProjectType::GoModule,
+            "java_project" => ProjectType::JavaProject,
+            "terraform_module" => ProjectType::TerraformModule,
+            _ => ProjectType::Directory,
+        }
+    }
+}
+
+/// A module/project detected in the codebase.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Module {
+    /// Unique identifier (derived from path)
+    pub id: String,
+    /// Display name
+    pub name: String,
+    /// Path relative to index root
+    pub path: String,
+    /// Primary language
+    pub language: Language,
+    /// Type of project/module
+    pub project_type: ProjectType,
+    /// Parent module ID (for nested modules)
+    pub parent_id: Option<String>,
+}
+
+impl Module {
+    /// Create a new module.
+    pub fn new(
+        name: String,
+        path: String,
+        language: Language,
+        project_type: ProjectType,
+    ) -> Self {
+        // Generate ID from path
+        let id = path.replace('/', "::").replace('\\', "::");
+        Self {
+            id,
+            name,
+            path,
+            language,
+            project_type,
+            parent_id: None,
+        }
+    }
+
+    /// Set the parent module ID.
+    pub fn with_parent(mut self, parent_id: String) -> Self {
+        self.parent_id = Some(parent_id);
         self
     }
 }

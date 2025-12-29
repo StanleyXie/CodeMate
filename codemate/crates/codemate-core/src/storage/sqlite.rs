@@ -1,10 +1,10 @@
 //! SQLite storage backend implementation.
 
-use crate::chunk::{Chunk, ChunkKind, ChunkLocation, Edge, EdgeKind, Language};
+use crate::chunk::{Chunk, ChunkKind, ChunkLocation, Edge, EdgeKind, Language, Module, ProjectType};
 use crate::content_hash::ContentHash;
 use crate::error::Result;
 use crate::storage::traits::{
-    ChunkStore, Embedding, GraphStore, LocationStore, QueryStore, SimilarityResult, VectorStore,
+    ChunkStore, Embedding, GraphStore, LocationStore, ModuleStore, QueryStore, SimilarityResult, VectorStore,
 };
 use crate::query::SearchQuery;
 use async_trait::async_trait;
@@ -43,6 +43,21 @@ impl SqliteStorage {
         let conn = self.conn.lock().unwrap();
         conn.execute_batch(
             r#"
+            -- Modules table for project/crate/package detection
+            CREATE TABLE IF NOT EXISTS modules (
+                id              TEXT PRIMARY KEY,
+                name            TEXT NOT NULL,
+                path            TEXT NOT NULL,
+                language        TEXT NOT NULL,
+                project_type    TEXT NOT NULL,
+                parent_id       TEXT,
+                created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY(parent_id) REFERENCES modules(id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_modules_path ON modules(path);
+            CREATE INDEX IF NOT EXISTS idx_modules_parent ON modules(parent_id);
+
             -- Chunks table
             CREATE TABLE IF NOT EXISTS chunks (
                 content_hash    TEXT PRIMARY KEY,
@@ -56,11 +71,14 @@ impl SqliteStorage {
                 line_start      INTEGER NOT NULL DEFAULT 0,
                 line_end        INTEGER NOT NULL DEFAULT 0,
                 line_count      INTEGER NOT NULL,
-                created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+                module_id       TEXT,
+                created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY(module_id) REFERENCES modules(id)
             );
             
             CREATE INDEX IF NOT EXISTS idx_chunks_symbol ON chunks(symbol_name);
             CREATE INDEX IF NOT EXISTS idx_chunks_kind ON chunks(chunk_kind, language);
+            CREATE INDEX IF NOT EXISTS idx_chunks_module ON chunks(module_id);
 
             -- Embeddings table
             CREATE TABLE IF NOT EXISTS embeddings (
@@ -112,11 +130,27 @@ impl SqliteStorage {
                 content,
                 tokenize='unicode61'
             );
+
+            -- Module edges view (aggregated cross-module dependencies)
+            CREATE VIEW IF NOT EXISTS module_edges AS
+            SELECT 
+                src_chunk.module_id AS source_module,
+                m2.id AS target_module,
+                COUNT(*) AS edge_count
+            FROM edges e
+            JOIN chunks src_chunk ON e.source_hash = src_chunk.content_hash
+            LEFT JOIN chunks tgt_chunk ON e.target_query = tgt_chunk.symbol_name
+            LEFT JOIN modules m2 ON tgt_chunk.module_id = m2.id
+            WHERE src_chunk.module_id IS NOT NULL 
+              AND m2.id IS NOT NULL
+              AND src_chunk.module_id != m2.id
+            GROUP BY src_chunk.module_id, m2.id;
             "#,
         )?;
         Ok(())
     }
 }
+
 
 #[async_trait]
 impl ChunkStore for SqliteStorage {
@@ -125,8 +159,8 @@ impl ChunkStore for SqliteStorage {
         conn.execute(
             r#"
             INSERT OR REPLACE INTO chunks 
-            (content_hash, content, language, chunk_kind, symbol_name, signature, docstring, byte_size, line_start, line_end, line_count)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            (content_hash, content, language, chunk_kind, symbol_name, signature, docstring, byte_size, line_start, line_end, line_count, module_id)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
             "#,
             params![
                 chunk.content_hash.to_hex(),
@@ -140,6 +174,7 @@ impl ChunkStore for SqliteStorage {
                 chunk.line_start as i64,
                 chunk.line_end as i64,
                 chunk.line_count as i64,
+                chunk.module_id,
             ],
         )?;
 
@@ -164,7 +199,7 @@ impl ChunkStore for SqliteStorage {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             r#"
-            SELECT content_hash, content, language, chunk_kind, symbol_name, signature, docstring, byte_size, line_start, line_end, line_count
+            SELECT content_hash, content, language, chunk_kind, symbol_name, signature, docstring, byte_size, line_start, line_end, line_count, module_id
             FROM chunks WHERE content_hash = ?1
             "#,
         )?;
@@ -181,6 +216,7 @@ impl ChunkStore for SqliteStorage {
             let line_start: usize = row.get(8)?;
             let line_end: usize = row.get(9)?;
             let line_count: usize = row.get(10)?;
+            let module_id: Option<String> = row.get(11)?;
 
             let language = Language::from_extension(&lang_str);
             let kind = match kind_str.as_str() {
@@ -206,6 +242,7 @@ impl ChunkStore for SqliteStorage {
                 line_start,
                 line_end,
                 line_count,
+                module_id,
             })
         });
 
@@ -245,7 +282,7 @@ impl ChunkStore for SqliteStorage {
     async fn find_by_symbol(&self, symbol_name: &str) -> Result<Vec<Chunk>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT content_hash, content, language, chunk_kind, symbol_name, signature, docstring FROM chunks WHERE symbol_name = ?1"
+            "SELECT content_hash, content, language, chunk_kind, symbol_name, signature, docstring, module_id FROM chunks WHERE symbol_name = ?1"
         )?;
 
         let chunks = stmt.query_map(params![symbol_name], |row| {
@@ -256,6 +293,7 @@ impl ChunkStore for SqliteStorage {
             let symbol_name: Option<String> = row.get(4)?;
             let signature: Option<String> = row.get(5)?;
             let docstring: Option<String> = row.get(6)?;
+            let module_id: Option<String> = row.get(7)?;
 
             let line_count = content.lines().count();
 
@@ -271,6 +309,7 @@ impl ChunkStore for SqliteStorage {
                 line_start: 0,
                 line_end: 0,
                 line_count,
+                module_id,
             })
         })?
         .filter_map(|r| r.ok())
@@ -279,6 +318,7 @@ impl ChunkStore for SqliteStorage {
         Ok(chunks)
     }
 }
+
 
 #[async_trait]
 impl VectorStore for SqliteStorage {
@@ -776,6 +816,231 @@ impl QueryStore for SqliteStorage {
         final_results.truncate(query.limit);
 
         Ok(final_results)
+    }
+}
+
+#[async_trait]
+impl ModuleStore for SqliteStorage {
+    async fn put_module(&self, module: &Module) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            r#"
+            INSERT OR REPLACE INTO modules 
+            (id, name, path, language, project_type, parent_id)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "#,
+            params![
+                module.id,
+                module.name,
+                module.path,
+                module.language.as_str(),
+                module.project_type.as_str(),
+                module.parent_id,
+            ],
+        )?;
+        Ok(())
+    }
+
+    async fn get_module(&self, id: &str) -> Result<Option<Module>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, path, language, project_type, parent_id FROM modules WHERE id = ?1"
+        )?;
+
+        let result = stmt.query_row(params![id], |row| {
+            let id: String = row.get(0)?;
+            let name: String = row.get(1)?;
+            let path: String = row.get(2)?;
+            let lang_str: String = row.get(3)?;
+            let type_str: String = row.get(4)?;
+            let parent_id: Option<String> = row.get(5)?;
+
+            Ok(Module {
+                id,
+                name,
+                path,
+                language: Language::from_str(&lang_str),
+                project_type: ProjectType::from_str(&type_str),
+                parent_id,
+            })
+        });
+
+        match result {
+            Ok(module) => Ok(Some(module)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    async fn get_all_modules(&self) -> Result<Vec<Module>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, path, language, project_type, parent_id FROM modules"
+        )?;
+
+        let modules = stmt.query_map([], |row| {
+            let id: String = row.get(0)?;
+            let name: String = row.get(1)?;
+            let path: String = row.get(2)?;
+            let lang_str: String = row.get(3)?;
+            let type_str: String = row.get(4)?;
+            let parent_id: Option<String> = row.get(5)?;
+
+            Ok(Module {
+                id,
+                name,
+                path,
+                language: Language::from_str(&lang_str),
+                project_type: ProjectType::from_str(&type_str),
+                parent_id,
+            })
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+
+        Ok(modules)
+    }
+
+    async fn get_child_modules(&self, parent_id: &str) -> Result<Vec<Module>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, path, language, project_type, parent_id FROM modules WHERE parent_id = ?1"
+        )?;
+
+        let modules = stmt.query_map(params![parent_id], |row| {
+            let id: String = row.get(0)?;
+            let name: String = row.get(1)?;
+            let path: String = row.get(2)?;
+            let lang_str: String = row.get(3)?;
+            let type_str: String = row.get(4)?;
+            let parent_id: Option<String> = row.get(5)?;
+
+            Ok(Module {
+                id,
+                name,
+                path,
+                language: Language::from_str(&lang_str),
+                project_type: ProjectType::from_str(&type_str),
+                parent_id,
+            })
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+
+        Ok(modules)
+    }
+
+    async fn get_module_dependencies(&self, module_id: &str) -> Result<Vec<(String, usize)>> {
+        let deps = self.get_unified_graph("module", Some(vec![module_id.to_string()]), false).await?;
+        if let Some((_, dependencies)) = deps.into_iter().next() {
+            Ok(dependencies.into_iter().map(|(id, count, _)| (id, count)).collect())
+        } else {
+            Ok(vec![])
+        }
+    }
+
+    async fn get_unified_graph(&self, level: &str, filter_ids: Option<Vec<String>>, include_edges: bool) -> anyhow::Result<Vec<(Module, Vec<(String, usize, Option<Vec<(String, String)>>)>)>> {
+        // 1. Get modules to process (this might involve awaits)
+        let mut target_modules = Vec::new();
+        if let Some(ids) = &filter_ids {
+            for id in ids {
+                if let Some(m) = self.get_module(id).await? {
+                    target_modules.push(m);
+                }
+            }
+        } else {
+            target_modules = self.get_all_modules().await?;
+        }
+
+        // 2. Filter modules based on level (if crate-level, skip directories)
+        if level == "crate" {
+            target_modules.retain(|m| m.project_type.as_str() != "directory");
+        }
+
+        let mut result = Vec::new();
+
+        for module in target_modules {
+            let mut dependencies = Vec::new();
+
+            let deps_raw: Vec<(String, usize)> = {
+                let conn = self.conn.lock().unwrap();
+                let dep_query = if level == "crate" {
+                    r#"
+                    WITH RECURSIVE crate_map(mod_id, crate_id) AS (
+                        SELECT id, id FROM modules WHERE project_type != 'directory'
+                        UNION ALL
+                        SELECT m.id, cm.crate_id
+                        FROM modules m
+                        JOIN crate_map cm ON m.parent_id = cm.mod_id
+                        WHERE m.project_type = 'directory'
+                    )
+                    SELECT cm2.crate_id, COUNT(*)
+                    FROM edges e
+                    JOIN chunks c1 ON e.source_hash = c1.content_hash
+                    JOIN crate_map cm1 ON c1.module_id = cm1.mod_id
+                    LEFT JOIN chunks c2 ON e.target_query = c2.symbol_name
+                    JOIN crate_map cm2 ON c2.module_id = cm2.mod_id
+                    WHERE cm1.crate_id = ?1 AND cm2.crate_id != ?1
+                    GROUP BY cm2.crate_id
+                    ORDER BY COUNT(*) DESC
+                    "#
+                } else {
+                    r#"
+                    SELECT target_module, edge_count 
+                    FROM module_edges 
+                    WHERE source_module = ?1
+                    ORDER BY edge_count DESC
+                    "#
+                };
+
+                let mut stmt = conn.prepare(dep_query)?;
+                let rows = stmt.query_map(params![module.id], |row| {
+                    Ok((row.get(0)?, row.get(1)?))
+                })?;
+                
+                let mut results = Vec::new();
+                for row in rows {
+                    if let Ok(res) = row {
+                        results.push(res);
+                    }
+                }
+                results
+            };
+
+            for (target_id, count) in deps_raw {
+                let edges = if include_edges {
+                    let conn = self.conn.lock().unwrap();
+                    let mut edge_stmt = conn.prepare(
+                        r#"
+                        SELECT c1.symbol_name, e.target_query
+                        FROM edges e
+                        JOIN chunks c1 ON e.source_hash = c1.content_hash
+                        LEFT JOIN chunks c2 ON e.target_query = c2.symbol_name
+                        WHERE c1.module_id = ?1 AND c2.module_id = ?2
+                        "#
+                    )?;
+                    let edges_rows = edge_stmt.query_map(params![module.id, target_id], |row| {
+                        Ok((row.get(0).unwrap_or_else(|_| "unknown".to_string()), row.get(1)?))
+                    })?;
+                    
+                    let mut edges_results = Vec::new();
+                    for edge_row in edges_rows {
+                        if let Ok(res) = edge_row {
+                            edges_results.push(res);
+                        }
+                    }
+                    Some(edges_results)
+                } else {
+                    None
+                };
+
+                dependencies.push((target_id, count, edges));
+            }
+
+            result.push((module, dependencies));
+        }
+
+        Ok(result)
     }
 }
 

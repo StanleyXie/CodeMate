@@ -4,6 +4,7 @@ import sys
 import os
 import time
 import threading
+import tempfile
 
 def log_stderr(proc):
     for line in iter(proc.stderr.readline, b''):
@@ -12,6 +13,7 @@ def log_stderr(proc):
 def send_request(proc, method, params=None, req_id=1):
     request = {
         "jsonrpc": "2.0",
+        "type": "request",
         "id": req_id,
         "method": method,
         "params": params or {}
@@ -23,7 +25,19 @@ def send_request(proc, method, params=None, req_id=1):
     line = proc.stdout.readline()
     if not line:
         return None
+    print(f"DEBUG raw stdout: {line.decode().strip()}")
     return json.loads(line.decode())
+
+def send_notification(proc, method, params=None):
+    notification = {
+        "jsonrpc": "2.0",
+        "type": "notification",
+        "method": method,
+        "params": params or {}
+    }
+    msg = json.dumps(notification) + "\n"
+    proc.stdin.write(msg.encode())
+    proc.stdin.flush()
 
 def test_mcp():
     # Use built binary for performance
@@ -32,9 +46,12 @@ def test_mcp():
         print("✗ Binary not found. Please run 'cargo build -p codemate-server' first.")
         return
 
-    print("Starting CodeMate MCP server...")
+    # Create a fresh temp database for testing
+    temp_db = tempfile.mktemp(suffix=".db", prefix="mcp_test_")
+    
+    print(f"Starting CodeMate MCP server with temp db: {temp_db}...")
     proc = subprocess.Popen(
-        [binary_path, "--mcp"],
+        [binary_path, "--mcp", "--database", temp_db],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE
@@ -45,7 +62,8 @@ def test_mcp():
 
     try:
         # Give server time to initialize (especially model loading)
-        time.sleep(2)
+        print("Waiting for server to initialize (loading embedding model)...")
+        time.sleep(5)
         
         print("1. Initializing...")
         resp = send_request(proc, "initialize", {
@@ -56,6 +74,9 @@ def test_mcp():
         })
         if resp and "result" in resp:
             print("✓ Initialize successful")
+            # Send initialized notification
+            send_notification(proc, "initialized")
+            print("✓ Sent initialized notification")
         else:
             print(f"✗ Initialize failed: {resp}")
             return
@@ -74,6 +95,9 @@ def test_mcp():
         print(f"\nTest failed: {e}")
     finally:
         proc.terminate()
+        # Clean up temp database
+        if os.path.exists(temp_db):
+            os.remove(temp_db)
 
 if __name__ == "__main__":
     test_mcp()

@@ -1,7 +1,10 @@
 use std::sync::Arc;
 use axum::{Json, Extension, http::StatusCode};
 use codemate_core::service::{CodeMateService, SearchOptions};
-use crate::models::{SearchRequest, SearchResponse, TreeRequest, TreeResponse, IndexRequest, IndexResponse};
+use crate::models::{
+    IndexRequest, IndexResponse, ModuleGraphRequest, ModuleGraphResponse, SearchRequest, SearchResponse, TreeRequest,
+    TreeResponse,
+};
 
 pub struct AppState {
     pub service: Arc<dyn CodeMateService>,
@@ -21,10 +24,6 @@ pub async fn search(
     let results = state.service.search(&req.query, options).await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     
-    // Convert codemate_core::service::models::SearchResult to crate::models::SearchResult if necessary
-    // Assuming for now they match or can be easily mapped.
-    // If they don't match exactly, I'll need to update models.rs or do mapping here.
-    // Let's assume they match for a moment and check models.rs after this call.
     Ok(Json(SearchResponse { results }))
 }
 
@@ -41,6 +40,18 @@ pub async fn tree(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(TreeResponse { tree }))
+}
+
+pub async fn module_graph(
+    Extension(state): Extension<SharedState>,
+    Json(req): Json<ModuleGraphRequest>,
+) -> Result<Json<ModuleGraphResponse>, (StatusCode, String)> {
+    let show_edges = req.show_edges.unwrap_or(false);
+    
+    let modules = state.service.get_module_graph(req.level, req.filters, show_edges).await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(ModuleGraphResponse { modules }))
 }
 
 pub async fn health() -> StatusCode {

@@ -8,7 +8,7 @@ use tokio::sync::Mutex;
 use anyhow::Result;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
-use crate::handlers::{AppState, index, search, tree, health};
+use crate::handlers::{AppState, index, search, tree, health, module_graph};
 use codemate_core::storage::SqliteStorage;
 use codemate_core::service::CodeMateService;
 use crate::service::DefaultCodeMateService;
@@ -29,6 +29,7 @@ pub async fn start(db_path: std::path::PathBuf, port: u16) -> Result<()> {
         .route("/api/v1/index", post(index))
         .route("/api/v1/search", post(search))
         .route("/api/v1/graph/tree", post(tree))
+        .route("/api/v1/graph/modules", post(module_graph))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .layer(Extension(state));

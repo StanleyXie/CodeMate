@@ -1,4 +1,5 @@
 pub mod models;
+pub mod exporter;
 
 use std::path::Path;
 use async_trait::async_trait;
@@ -21,4 +22,10 @@ pub trait CodeMateService: Send + Sync {
     
     /// Find semantic and structural relatives
     async fn get_related(&self, symbol: &str, limit: usize) -> anyhow::Result<RelatedResponse>;
+
+    /// Get the module-level dependency graph
+    async fn get_module_graph(&self, level: Option<String>, filter_ids: Option<Vec<String>>, show_edges: bool) -> anyhow::Result<Vec<ModuleResponse>>;
+
+    /// Find circular dependencies between modules
+    async fn find_module_cycles(&self) -> anyhow::Result<Vec<Vec<String>>>;
 }

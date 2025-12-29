@@ -39,7 +39,7 @@ pub async fn run(query_str: String, database: PathBuf, limit: usize, _threshold:
     let storage = SqliteStorage::new(&database)?;
     
     // Initialize embeddings
-    let mut embedder = EmbeddingGenerator::new()?;
+    let embedder = EmbeddingGenerator::new()?;
     
     // Generate query embedding (using the semantic part of the query)
     let query_embedding = embedder.embed(&query.raw_query)?;

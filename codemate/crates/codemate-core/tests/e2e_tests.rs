@@ -21,7 +21,7 @@ async fn test_index_rust_file() {
 
     // Extract chunks
     let extractor = ChunkExtractor::new();
-    let chunks = extractor.extract_file(&rust_file).unwrap();
+    let (chunks, _edges) = extractor.extract_file(&rust_file).unwrap();
 
     // Verify we extracted functions
     assert!(!chunks.is_empty(), "Should extract at least one chunk");
@@ -55,7 +55,7 @@ async fn test_index_python_file() {
 
     // Extract chunks
     let extractor = ChunkExtractor::new();
-    let chunks = extractor.extract_file(&python_file).unwrap();
+    let (chunks, _edges) = extractor.extract_file(&python_file).unwrap();
 
     // Verify we extracted functions
     assert!(!chunks.is_empty(), "Should extract at least one chunk");

@@ -29,7 +29,7 @@ enum Commands {
         path: PathBuf,
 
         /// Database path
-        #[arg(short, long, default_value = ".codemate/index.db")]
+        #[arg(short = 'd', long = "db", default_value = ".codemate/index.db")]
         database: PathBuf,
 
         /// Enable git-aware indexing with commit tracking
@@ -47,7 +47,7 @@ enum Commands {
         query: String,
 
         /// Database path
-        #[arg(short, long, default_value = ".codemate/index.db")]
+        #[arg(short = 'd', long = "db", default_value = ".codemate/index.db")]
         database: PathBuf,
 
         /// Maximum results
@@ -60,9 +60,10 @@ enum Commands {
     },
 
     /// Show index statistics
+    #[command(alias = "ls")]
     Stats {
         /// Database path
-        #[arg(short, long, default_value = ".codemate/index.db")]
+        #[arg(short = 'd', long = "db", default_value = ".codemate/index.db")]
         database: PathBuf,
     },
 
@@ -72,7 +73,7 @@ enum Commands {
         target: String,
 
         /// Database path
-        #[arg(short, long, default_value = ".codemate/index.db")]
+        #[arg(short = 'd', long = "db", default_value = ".codemate/index.db")]
         database: PathBuf,
 
         /// Maximum history entries to show
@@ -86,7 +87,39 @@ enum Commands {
         subcommand: GraphSubcommand,
 
         /// Database path
-        #[arg(short, long, default_value = ".codemate/index.db")]
+        #[arg(short = 'd', long = "db", default_value = ".codemate/index.db")]
+        database: PathBuf,
+    },
+
+    /// Visualize module-level dependencies
+    #[command(alias = "viz")]
+    Modules {
+        /// Output format (text, dot, mermaid, json, html)
+        #[arg(short, long, default_value = "text")]
+        format: String,
+
+        /// Output file path
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+
+        /// Abstraction level (crate, module)
+        #[arg(short, long, default_value = "crate")]
+        level: String,
+
+        /// Show detailed function-level edges between modules
+        #[arg(short, long = "edges")]
+        edges: bool,
+
+        /// Filter by specific module IDs (repeat for multiple)
+        #[arg(short = 'i', long)]
+        filter: Option<Vec<String>>,
+
+        /// Check for circular dependencies between modules
+        #[arg(short, long = "cycles")]
+        cycles: bool,
+
+        /// Database path
+        #[arg(short = 'd', long = "db", default_value = ".codemate/index.db")]
         database: PathBuf,
     },
 }
@@ -163,6 +196,9 @@ async fn main() -> Result<()> {
                     commands::graph::run_tree(symbol, all, database, depth).await?;
                 }
             }
+        }
+        Commands::Modules { format, output, level, edges, filter, cycles, database } => {
+            commands::graph::run_modules(database, format, output, level, edges, filter, cycles).await?;
         }
     }
 

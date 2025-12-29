@@ -8,7 +8,7 @@ mod sqlite;
 pub mod utils;
 
 pub use traits::{
-    ChunkStore, Embedder, Embedding, GraphStore, LocationStore, QueryStore, SimilarityResult,
-    VectorStore,
+    ChunkStore, Embedder, Embedding, GraphStore, LocationStore, ModuleStore, QueryStore,
+    SimilarityResult, VectorStore,
 };
 pub use sqlite::SqliteStorage;

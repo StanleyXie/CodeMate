@@ -103,6 +103,18 @@ impl ServerHandler for McpHandler {
                             "required": ["symbol"]
                         }),
                     },
+                    Tool {
+                        name: "get_module_graph".to_string(),
+                        description: "Get the module-level dependency graph of the project.".to_string(),
+                        schema: json!({
+                            "type": "object",
+                            "properties": {
+                                "level": { "type": "string", "description": "Abstraction level: crate|module" },
+                                "filters": { "type": "array", "items": { "type": "string" }, "description": "Filter by specific module IDs" },
+                                "show_edges": { "type": "boolean", "description": "Show specific symbol-level links" }
+                            }
+                        }),
+                    },
                 ];
                 Ok(json!({ "tools": tools }))
             }
@@ -151,6 +163,25 @@ impl ServerHandler for McpHandler {
                                 {
                                     "type": "text",
                                     "text": format!("Graph Neighbors: {:?}\nSemantically Similar: {:?}", related.graph_neighbors, related.semantic_relatives)
+                                }
+                            ]
+                        }))
+                    }
+                    "get_module_graph" => {
+                        let level = args["level"].as_str().map(|s| s.to_string());
+                        let filters = args["filters"].as_array().map(|arr| {
+                            arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()
+                        });
+                        let show_edges = args["show_edges"].as_bool().unwrap_or(false);
+
+                        let graph = self.service.get_module_graph(level, filters, show_edges).await
+                            .map_err(|e| Error::protocol(ErrorCode::InternalError, e.to_string()))?;
+                        
+                        Ok(json!({
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": format!("{:?}", graph)
                                 }
                             ]
                         }))

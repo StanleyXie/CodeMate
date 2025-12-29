@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
-use crate::chunk::Chunk;
-use crate::storage::SimilarityResult;
+use crate::chunk::{Chunk, Module};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SearchResult {
@@ -13,6 +12,26 @@ pub struct SearchResult {
 pub struct RelatedResponse {
     pub graph_neighbors: Vec<String>,
     pub semantic_relatives: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ModuleEdgeDetail {
+    pub source_symbol: String,
+    pub target_symbol: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ModuleDependency {
+    pub target_id: String,
+    pub target_name: String,
+    pub count: usize,
+    pub edges: Option<Vec<ModuleEdgeDetail>>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ModuleResponse {
+    pub module: Module,
+    pub dependencies: Vec<ModuleDependency>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
