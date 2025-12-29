@@ -39,8 +39,9 @@ jobs:
         shell: bash
         run: |
           cd codemate/target/${{ matrix.target }}/release
-          tar -czf ../../../codemate-${{ matrix.target }}.tar.gz codemate codemate-server
-          cd ../../../
+          tar -czf ../../../../codemate-${{ matrix.target }}.tar.gz codemate${{ matrix.suffix }} codemate-server${{ matrix.suffix }}
+          cd ../../../../
+          ls -lh codemate-${{ matrix.target }}.tar.gz
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
