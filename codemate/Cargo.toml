@@ -37,7 +37,8 @@ serde_json = "1.0"
 
 # Error handling
 anyhow = "1.0"
-thiserror = "1.0"
+thiserror = "2.0"
+fastembed = { version = "5", default-features = false, features = ["hf-hub-native-tls", "ort-download-binaries"] }
 
 # CLI
 clap = { version = "4.4", features = ["derive"] }
@@ -50,7 +51,9 @@ hex = "0.4"
 # Logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-
+base64 = "0.22"
+rand = "0.9"
+getrandom = "0.3"
 # Utilities
 chrono = { version = "0.4", default-features = false, features = ["serde", "std", "clock"] }
 

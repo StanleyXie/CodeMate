@@ -15,4 +15,4 @@ tracing.workspace = true
 
 # Git operations
 git2 = { version = "0.19", features = ["vendored-openssl"] }
-chrono = { version = "0.4", features = ["serde"] }
+chrono.workspace = true
