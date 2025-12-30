@@ -23,35 +23,76 @@ impl ProjectDetector {
         }
     }
 
-    /// Scan the directory tree and detect all modules.
-    pub fn detect_modules(&mut self) -> Vec<Module> {
-        self.scan_directory(&self.root_path.clone());
-        self.modules.values().cloned().collect()
+    /// Set detected modules.
+    pub fn set_modules(&mut self, modules: Vec<Module>) {
+        for module in modules {
+            self.modules.insert(module.id.clone(), module);
+        }
     }
 
+    /// Scan the directory tree and detect all modules.
+    pub fn detect_modules(&mut self) -> Vec<Module> {
+        self.scan_directory(&self.root_path.clone(), None);
+        self.modules.values().cloned().collect()
+    }
+    
     /// Scan a directory for project markers.
-    fn scan_directory(&mut self, dir: &Path) {
-        // Check for various project markers
-        if let Some(module) = self.detect_rust_project(dir) {
-            self.modules.insert(module.path.clone(), module);
+    fn scan_directory(&mut self, dir: &Path, parent_id: Option<String>) {
+        let rel_path = self.relative_path(dir);
+        
+        // Determine standardized ID: root or path components joined by ::
+        let current_id = if rel_path.is_empty() {
+            "root".to_string()
+        } else {
+            rel_path.replace('/', "::").replace('\\', "::")
+        };
+
+        // 1. Detect if this is a project module
+        let detected = if let Some(module) = self.detect_rust_project(dir) {
+            Some(module)
         } else if let Some(module) = self.detect_python_project(dir) {
-            self.modules.insert(module.path.clone(), module);
+            Some(module)
         } else if let Some(module) = self.detect_node_project(dir) {
-            self.modules.insert(module.path.clone(), module);
+            Some(module)
         } else if let Some(module) = self.detect_go_project(dir) {
-            self.modules.insert(module.path.clone(), module);
+            Some(module)
         } else if let Some(module) = self.detect_java_project(dir) {
-            self.modules.insert(module.path.clone(), module);
+            Some(module)
         } else if let Some(module) = self.detect_terraform_project(dir) {
-            self.modules.insert(module.path.clone(), module);
+            Some(module)
+        } else {
+            None
+        };
+
+        let mut module = if let Some(mut m) = detected {
+            m.id = current_id.clone();
+            m
+        } else {
+            let name = if rel_path.is_empty() {
+                "root".to_string()
+            } else {
+                self.dir_name(dir).unwrap_or_else(|| "dir".to_string())
+            };
+            let mut m = Module::new(name, rel_path.clone(), Language::Unknown, ProjectType::Directory);
+            m.id = current_id.clone();
+            m
+        };
+
+        if let Some(ref pid) = parent_id {
+            if pid != &module.id {
+                module = module.with_parent(pid.clone());
+            }
         }
 
+        self.modules.insert(module.id.clone(), module);
+        let next_parent_id = Some(current_id);
+        
         // Recursively scan subdirectories
         if let Ok(entries) = std::fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.is_dir() && !self.should_skip_dir(&path) {
-                    self.scan_directory(&path);
+                    self.scan_directory(&path, next_parent_id.clone());
                 }
             }
         }
@@ -200,6 +241,10 @@ impl ProjectDetector {
             .and_then(|n| n.to_str())
             .unwrap_or("");
         
+        if name.starts_with('.') && name != "." && name != ".." {
+            return true;
+        }
+
         matches!(name, 
             "node_modules" | "target" | ".git" | "__pycache__" | 
             "venv" | ".venv" | "vendor" | "dist" | "build" | ".terraform"

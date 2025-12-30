@@ -18,6 +18,8 @@ pub struct RelatedResponse {
 pub struct ModuleEdgeDetail {
     pub source_symbol: String,
     pub target_symbol: String,
+    pub line_number: Option<usize>,
+    pub kind: crate::chunk::EdgeKind,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

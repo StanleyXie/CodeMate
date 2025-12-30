@@ -28,6 +28,14 @@ impl SqliteStorage {
         Ok(storage)
     }
 
+    /// Set foreign key constraint check status.
+    pub fn set_foreign_keys(&self, enabled: bool) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let pragma = if enabled { "PRAGMA foreign_keys = ON;" } else { "PRAGMA foreign_keys = OFF;" };
+        conn.execute_batch(pragma)?;
+        Ok(())
+    }
+
     /// Create an in-memory SQLite storage (for testing).
     pub fn in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
@@ -41,6 +49,7 @@ impl SqliteStorage {
     /// Initialize the database schema.
     fn init_schema(&self) -> Result<()> {
         let conn = self.conn.lock().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         conn.execute_batch(
             r#"
             -- Modules table for project/crate/package detection
@@ -139,7 +148,7 @@ impl SqliteStorage {
                 COUNT(*) AS edge_count
             FROM edges e
             JOIN chunks src_chunk ON e.source_hash = src_chunk.content_hash
-            LEFT JOIN chunks tgt_chunk ON e.target_query = tgt_chunk.symbol_name
+            LEFT JOIN chunks tgt_chunk ON (e.target_query = tgt_chunk.symbol_name OR e.target_query LIKE tgt_chunk.symbol_name || '::%')
             LEFT JOIN modules m2 ON tgt_chunk.module_id = m2.id
             WHERE src_chunk.module_id IS NOT NULL 
               AND m2.id IS NOT NULL
@@ -825,9 +834,14 @@ impl ModuleStore for SqliteStorage {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             r#"
-            INSERT OR REPLACE INTO modules 
-            (id, name, path, language, project_type, parent_id)
+            INSERT INTO modules (id, name, path, language, project_type, parent_id)
             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                path = excluded.path,
+                language = excluded.language,
+                project_type = excluded.project_type,
+                parent_id = excluded.parent_id
             "#,
             params![
                 module.id,
@@ -835,7 +849,7 @@ impl ModuleStore for SqliteStorage {
                 module.path,
                 module.language.as_str(),
                 module.project_type.as_str(),
-                module.parent_id,
+                module.parent_id
             ],
         )?;
         Ok(())
@@ -939,7 +953,7 @@ impl ModuleStore for SqliteStorage {
         }
     }
 
-    async fn get_unified_graph(&self, level: &str, filter_ids: Option<Vec<String>>, include_edges: bool) -> anyhow::Result<Vec<(Module, Vec<(String, usize, Option<Vec<(String, String)>>)>)>> {
+    async fn get_unified_graph(&self, level: &str, filter_ids: Option<Vec<String>>, include_edges: bool) -> anyhow::Result<Vec<(Module, Vec<(String, usize, Option<Vec<crate::service::models::ModuleEdgeDetail>>)>)>> {
         // 1. Get modules to process (this might involve awaits)
         let mut target_modules = Vec::new();
         if let Some(ids) = &filter_ids {
@@ -952,7 +966,6 @@ impl ModuleStore for SqliteStorage {
             target_modules = self.get_all_modules().await?;
         }
 
-        // 2. Filter modules based on level (if crate-level, skip directories)
         if level == "crate" {
             target_modules.retain(|m| m.project_type.as_str() != "directory");
         }
@@ -966,23 +979,49 @@ impl ModuleStore for SqliteStorage {
                 let conn = self.conn.lock().unwrap();
                 let dep_query = if level == "crate" {
                     r#"
-                    WITH RECURSIVE crate_map(mod_id, crate_id) AS (
-                        SELECT id, id FROM modules WHERE project_type != 'directory'
+                    WITH RECURSIVE crate_map(mod_id, crate_id, crate_name) AS (
+                        SELECT id, id, name FROM modules WHERE project_type != 'directory'
                         UNION ALL
-                        SELECT m.id, cm.crate_id
+                        SELECT m.id, cm.crate_id, cm.crate_name
                         FROM modules m
                         JOIN crate_map cm ON m.parent_id = cm.mod_id
                         WHERE m.project_type = 'directory'
                     )
-                    SELECT cm2.crate_id, COUNT(*)
-                    FROM edges e
-                    JOIN chunks c1 ON e.source_hash = c1.content_hash
-                    JOIN crate_map cm1 ON c1.module_id = cm1.mod_id
-                    LEFT JOIN chunks c2 ON e.target_query = c2.symbol_name
-                    JOIN crate_map cm2 ON c2.module_id = cm2.mod_id
-                    WHERE cm1.crate_id = ?1 AND cm2.crate_id != ?1
-                    GROUP BY cm2.crate_id
-                    ORDER BY COUNT(*) DESC
+                    SELECT 
+                        target_id,
+                        COUNT(*) as edge_count
+                    FROM (
+                        -- 1. Direct symbol matching via chunks
+                        SELECT cm2.crate_id as target_id
+                        FROM edges e
+                        JOIN chunks c1 ON e.source_hash = c1.content_hash
+                        JOIN crate_map cm1 ON c1.module_id = cm1.mod_id
+                        JOIN chunks c2 ON e.target_query = c2.symbol_name
+                        JOIN crate_map cm2 ON c2.module_id = cm2.mod_id
+                        WHERE cm1.crate_id = ?1 AND cm2.crate_id != ?1
+
+                        UNION ALL
+
+                        -- 2. Symbol prefix matching via module names
+                        SELECT m2.id as target_id
+                        FROM edges e
+                        JOIN chunks c1 ON e.source_hash = c1.content_hash
+                        JOIN crate_map cm1 ON c1.module_id = cm1.mod_id
+                        JOIN modules m2 ON m2.project_type != 'directory'
+                        WHERE cm1.crate_id = ?1 
+                          AND m2.id != cm1.crate_id
+                          AND (
+                              e.target_query LIKE REPLACE(m2.name, '-', '_') || '::%'
+                              OR e.target_query = REPLACE(m2.name, '-', '_')
+                              OR e.target_query LIKE m2.name || '::%'
+                              OR e.target_query = m2.name
+                          )
+                          -- Important: only count prefix matches if they didn't match exactly via chunks
+                          AND NOT EXISTS (SELECT 1 FROM chunks c3 WHERE c3.symbol_name = e.target_query)
+                    )
+                    GROUP BY target_id
+                    HAVING edge_count > 0
+                    ORDER BY edge_count DESC
                     "#
                 } else {
                     r#"
@@ -995,7 +1034,7 @@ impl ModuleStore for SqliteStorage {
 
                 let mut stmt = conn.prepare(dep_query)?;
                 let rows = stmt.query_map(params![module.id], |row| {
-                    Ok((row.get(0)?, row.get(1)?))
+                    Ok((row.get::<_, String>(0)?, row.get::<_, usize>(1)?))
                 })?;
                 
                 let mut results = Vec::new();
@@ -1012,24 +1051,45 @@ impl ModuleStore for SqliteStorage {
                     let conn = self.conn.lock().unwrap();
                     let mut edge_stmt = conn.prepare(
                         r#"
-                        SELECT c1.symbol_name, e.target_query
+                        WITH RECURSIVE crate_map(mod_id, crate_id) AS (
+                            SELECT id, id FROM modules
+                            UNION ALL
+                            SELECT m.id, cm.crate_id
+                            FROM modules m
+                            JOIN crate_map cm ON m.parent_id = cm.mod_id
+                        )
+                        SELECT c1.symbol_name, e.target_query, e.line_number, e.edge_kind
                         FROM edges e
                         JOIN chunks c1 ON e.source_hash = c1.content_hash
-                        LEFT JOIN chunks c2 ON e.target_query = c2.symbol_name
-                        WHERE c1.module_id = ?1 AND c2.module_id = ?2
+                        JOIN crate_map cm1 ON c1.module_id = cm1.mod_id
+                        -- Target matching: either by symbol_name or by ID prefix
+                        JOIN chunks c2 ON (e.target_query = c2.symbol_name OR e.target_query LIKE c2.symbol_name || '::%')
+                        JOIN crate_map cm2 ON c2.module_id = cm2.mod_id
+                        WHERE cm1.crate_id = ?1 AND cm2.crate_id = ?2
                         "#
                     )?;
                     let edges_rows = edge_stmt.query_map(params![module.id, target_id], |row| {
-                        Ok((row.get(0).unwrap_or_else(|_| "unknown".to_string()), row.get(1)?))
+                        let kind_str: String = row.get(3)?;
+                        let kind = match kind_str.as_str() {
+                            "calls" | "Calls" => EdgeKind::Calls,
+                            "imports" | "Imports" => EdgeKind::Imports,
+                            _ => EdgeKind::References,
+                        };
+                        Ok(crate::service::models::ModuleEdgeDetail {
+                            source_symbol: row.get::<_, Option<String>>(0)?.unwrap_or_else(|| "unknown".to_string()),
+                            target_symbol: row.get(1)?,
+                            line_number: row.get::<_, Option<i64>>(2)?.map(|l| l as usize),
+                            kind,
+                        })
                     })?;
-                    
-                    let mut edges_results = Vec::new();
-                    for edge_row in edges_rows {
-                        if let Ok(res) = edge_row {
-                            edges_results.push(res);
+
+                    let mut e_list = Vec::new();
+                    for e_row in edges_rows {
+                        if let Ok(e) = e_row {
+                            e_list.push(e);
                         }
                     }
-                    Some(edges_results)
+                    Some(e_list)
                 } else {
                     None
                 };

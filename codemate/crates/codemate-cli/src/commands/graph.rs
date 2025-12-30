@@ -288,7 +288,7 @@ async fn render_tree_recursive(
 }
 
 use codemate_core::service::exporter::ModuleGraphExporter;
-use codemate_core::service::models::{ModuleDependency, ModuleResponse, ModuleEdgeDetail};
+use codemate_core::service::models::{ModuleDependency, ModuleResponse};
 use std::fs;
 
 pub async fn run_modules(
@@ -336,12 +336,7 @@ pub async fn run_modules(
                 .unwrap_or_else(|| target_id.clone());
             
             let edges = edges_raw.map(|e_list| {
-                e_list.into_iter().map(|(src, tgt)| {
-                    ModuleEdgeDetail {
-                        source_symbol: src,
-                        target_symbol: tgt,
-                    }
-                }).collect()
+                e_list.into_iter().collect()
             });
 
             dependencies.push(ModuleDependency {
@@ -402,7 +397,16 @@ fn render_modules_text(modules: &[ModuleResponse], level: &str, show_edges: bool
                 if show_edges {
                     if let Some(ref edges) = dep.edges {
                         for edge in edges.iter().take(5) {
-                            println!("       • {} \u{2192} {}", edge.source_symbol.dimmed(), edge.target_symbol.dimmed());
+                            let kind_label = match edge.kind {
+                                codemate_core::EdgeKind::Calls => "calls".cyan(),
+                                codemate_core::EdgeKind::Imports => "imports".magenta(),
+                                codemate_core::EdgeKind::References => "references".yellow(),
+                            };
+                            print!("       • {} {} {}", edge.source_symbol.dimmed(), kind_label, edge.target_symbol.dimmed());
+                            if let Some(line) = edge.line_number {
+                                print!(" (line {})", line);
+                            }
+                            println!();
                         }
                         if edges.len() > 5 {
                             println!("       ... and {} more", edges.len() - 5);

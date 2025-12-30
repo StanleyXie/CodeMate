@@ -143,12 +143,7 @@ impl CodeMateService for DefaultCodeMateService {
                     .unwrap_or_else(|| target_id.clone());
                 
                 let edges = edges_raw.map(|e_list| {
-                    e_list.into_iter().map(|(src, tgt)| {
-                        codemate_core::service::models::ModuleEdgeDetail {
-                            source_symbol: src,
-                            target_symbol: tgt,
-                        }
-                    }).collect()
+                    e_list.into_iter().collect()
                 });
 
                 dependencies.push(ModuleDependency {
@@ -182,15 +177,29 @@ impl DefaultCodeMateService {
         
         let extractor = ChunkExtractor::new();
         
-        // Detect and store modules
         let mut detector = ProjectDetector::new(&path);
-        let modules = detector.detect_modules();
+        let mut modules = detector.detect_modules();
+        
+        // Sort modules by path depth to ensure parents are inserted before children
+        modules.sort_by_key(|m| {
+            if m.path.is_empty() { 0 } else { m.path.split('/').count() }
+        });
+
+        // Disable foreign keys during module insertion as a safety measure
+        storage.set_foreign_keys(false)?;
+
         for module in &modules {
-            let _ = storage.put_module(module).await;
+            storage.put_module(module).await?;
         }
+
+        // Re-enable foreign keys
+        storage.set_foreign_keys(true)?;
 
         let mut total_files = 0;
         let mut total_chunks = 0;
+
+        // Initialize detector with the modules we already detected
+        detector.set_modules(modules);
 
         for entry in WalkDir::new(&path)
             .into_iter()

@@ -1,6 +1,6 @@
 //! Chunk extraction from source code using tree-sitter.
 
-use codemate_core::{Chunk, ChunkKind, Language, Edge, EdgeKind, Result, ContentHash};
+use codemate_core::{Chunk, ChunkKind, Language, Edge, EdgeKind, Result};
 use std::path::Path;
 
 /// Extracts chunks from source code files.

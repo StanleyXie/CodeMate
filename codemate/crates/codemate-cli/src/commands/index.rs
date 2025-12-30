@@ -36,15 +36,26 @@ async fn run_simple(path: &PathBuf, database: &PathBuf) -> Result<()> {
     // Detect modules
     println!("{} Detecting modules...", "→".blue());
     let mut detector = ProjectDetector::new(path.as_path());
-    let modules = detector.detect_modules();
-    for module in &modules {
-        ModuleStore::put_module(&storage, module).await?;
-    }
-    println!("  Found {} modules", modules.len());
+    let mut modules = detector.detect_modules();
 
+    // Sort modules by path depth to ensure parents are inserted before children
+    modules.sort_by_key(|m| {
+        if m.path.is_empty() { 0 } else { m.path.split('/').count() }
+    });
+
+    // Disable foreign keys during module insertion as a safety measure
+    storage.set_foreign_keys(false)?;
+
+    for module in &modules {
+        storage.put_module(module).await?;
+    }
+
+    // Re-enable foreign keys
+    storage.set_foreign_keys(true)?;
+    
     // Initialize embeddings (lazy - created on first use)
     println!("{} Loading embedding model...", "→".blue());
-    let mut embedder = EmbeddingGenerator::new()?;
+    let embedder = EmbeddingGenerator::new()?;
 
     // Collect files to index
     let mut total_files = 0;
@@ -200,15 +211,28 @@ async fn run_git_aware(path: &PathBuf, database: &PathBuf) -> Result<()> {
     // Detect modules
     println!("{} Detecting modules...", "→".blue());
     let mut detector = ProjectDetector::new(path.as_path());
-    let modules = detector.detect_modules();
+    let mut modules = detector.detect_modules();
+
+    // Sort modules by path depth to ensure parents are inserted before children
+    modules.sort_by_key(|m| {
+        if m.path.is_empty() { 0 } else { m.path.split('/').count() }
+    });
+
+    // Disable foreign keys during module insertion as a safety measure
+    storage.set_foreign_keys(false)?;
+
     for module in &modules {
         ModuleStore::put_module(&storage, module).await?;
     }
-    println!("  Found {} modules", modules.len());
+
+    // Re-enable foreign keys
+    storage.set_foreign_keys(true)?;
+
+    println!("  Stored {} modules", modules.len());
 
     // Initialize embeddings
     println!("{} Loading embedding model...", "→".blue());
-    let mut embedder = EmbeddingGenerator::new()?;
+    let embedder = EmbeddingGenerator::new()?;
 
     let mut total_files = 0;
     let mut total_chunks = 0;

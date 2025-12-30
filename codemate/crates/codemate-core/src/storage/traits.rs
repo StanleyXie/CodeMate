@@ -170,7 +170,7 @@ pub trait ModuleStore: Send + Sync {
     async fn get_module_dependencies(&self, module_id: &str) -> Result<Vec<(String, usize)>>;
 
     /// Get a unified graph (module or symbol level) with optional filtering.
-    async fn get_unified_graph(&self, level: &str, filter_ids: Option<Vec<String>>, include_edges: bool) -> anyhow::Result<Vec<(Module, Vec<(String, usize, Option<Vec<(String, String)>>)>)>>;
+    async fn get_unified_graph(&self, level: &str, filter_ids: Option<Vec<String>>, include_edges: bool) -> anyhow::Result<Vec<(Module, Vec<(String, usize, Option<Vec<crate::service::models::ModuleEdgeDetail>>)>)>>;
 }
 
 

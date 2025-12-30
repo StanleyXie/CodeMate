@@ -15,7 +15,7 @@ impl ModuleGraphExporter {
 
             for dep in &m_resp.dependencies {
                 dot.push_str(&format!(
-                    "  \"{}\" -> \"{}\" [label=\"{}\"];\n",
+                    "  \"{}\" -> \"{}\" [label=\"{} edges\"];\n",
                     m_resp.module.id, dep.target_id, dep.count
                 ));
             }
@@ -32,7 +32,7 @@ impl ModuleGraphExporter {
             // We'll use [box] for modules.
             for dep in &m_resp.dependencies {
                 mermaid.push_str(&format!(
-                    "    {}[\"{}\"] -->|{}| {}[\"{}\"]\n",
+                    "    {}[\"{}\"] -->|{} edges| {}[\"{}\"]\n",
                     Self::sanitize_mermaid_id(&m_resp.module.id),
                     m_resp.module.name,
                     dep.count,
