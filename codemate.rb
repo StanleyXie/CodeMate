@@ -6,15 +6,15 @@ class Codemate < Formula
   if OS.mac?
     if Hardware::CPU.arm?
       url "https://github.com/StanleyXie/CodeMate/releases/download/v0.2.0/codemate-aarch64-apple-darwin.tar.gz"
-      sha256 "f47fd5d2c8d07530e4db876660a96b7ee8e7e19f8a4401abdeec215b97decacf"
+      sha256 "7a3c801f519b492b64073f39b97074c90e2fa083d824ebba2c3e21e98009cbae"
     else
       url "https://github.com/StanleyXie/CodeMate/releases/download/v0.2.0/codemate-x86_64-apple-darwin.tar.gz"
-      sha256 "d7a5d72d23f9898d6e1179f275431a5d709945603597559867e812f94d65e3b0"
+      sha256 "822b3826b480c54dfb23f15272aa9277d29bbabda45d8ee8813e3b025f24626f"
     end
   elsif OS.linux?
     if Hardware::CPU.intel?
       url "https://github.com/StanleyXie/CodeMate/releases/download/v0.2.0/codemate-x86_64-unknown-linux-gnu.tar.gz"
-      sha256 "1f4eff626cb44a0cebb05c5220155b5111160467ea18b66772af604ffeaabc0c"
+      sha256 "522a5a28f29ebf4c8a4135ea40db26eaefcaa82d671cd7d49dc7d699ec85662f"
     end
   end
 
