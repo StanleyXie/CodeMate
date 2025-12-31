@@ -6,7 +6,7 @@ class Codemate < Formula
   if OS.mac?
     if Hardware::CPU.arm?
       url "https://github.com/StanleyXie/CodeMate/releases/download/v0.2.1/codemate-aarch64-apple-darwin.tar.gz"
-      sha256 "009536aaafe7ae5f86e25fd1b6b0cd00dd2739c3e19e238d615e9e3e19909356"
+      sha256 "ac0cd7c6399003a197d97fe10622b49b9c44f5afb5b430b28fc7137c49359221"
     else
       url "https://github.com/StanleyXie/CodeMate/releases/download/v0.2.1/codemate-x86_64-apple-darwin.tar.gz"
       sha256 "822b3826b480c54dfb23f15272aa9277d29bbabda45d8ee8813e3b025f24626f"
