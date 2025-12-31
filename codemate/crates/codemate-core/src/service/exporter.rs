@@ -310,6 +310,8 @@ impl ModuleGraphExporter {
         mermaid.initialize({{ 
             startOnLoad: true,
             theme: 'default',
+            maxTextSize: 1000000,
+            securityLevel: 'loose',
             flowchart: {{ 
                 useMaxWidth: true, 
                 htmlLabels: true,
