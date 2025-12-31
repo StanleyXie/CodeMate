@@ -78,8 +78,45 @@ pub enum ChunkKind {
     DataSource,
     /// Terraform/HCL variable
     Variable,
-    /// Terraform/HCL output
+    /// Terraform/HCL    /// Output
     Output,
+}
+
+impl ChunkKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ChunkKind::Function => "function",
+            ChunkKind::Class => "class",
+            ChunkKind::Struct => "struct",
+            ChunkKind::Trait => "trait",
+            ChunkKind::Enum => "enum",
+            ChunkKind::Module => "module",
+            ChunkKind::Impl => "impl",
+            ChunkKind::Block => "block",
+            ChunkKind::Resource => "resource",
+            ChunkKind::DataSource => "data_source",
+            ChunkKind::Variable => "variable",
+            ChunkKind::Output => "output",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "function" | "Function" => ChunkKind::Function,
+            "class" | "Class" => ChunkKind::Class,
+            "struct" | "Struct" => ChunkKind::Struct,
+            "trait" | "Trait" => ChunkKind::Trait,
+            "enum" | "Enum" => ChunkKind::Enum,
+            "module" | "Module" => ChunkKind::Module,
+            "impl" | "Impl" => ChunkKind::Impl,
+            "block" | "Block" => ChunkKind::Block,
+            "resource" | "Resource" => ChunkKind::Resource,
+            "data_source" | "DataSource" => ChunkKind::DataSource,
+            "variable" | "Variable" => ChunkKind::Variable,
+            "output" | "Output" => ChunkKind::Output,
+            _ => ChunkKind::Block,
+        }
+    }
 }
 
 /// A chunk of code with metadata.

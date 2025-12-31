@@ -972,6 +972,63 @@ impl ModuleStore for SqliteStorage {
 
         let mut result = Vec::new();
 
+        // 1. Pre-calculate edges if requested to avoid N^2 queries
+        let mut edge_map: std::collections::HashMap<(String, String), Vec<crate::service::models::ModuleEdgeDetail>> = std::collections::HashMap::new();
+        if include_edges {
+            let conn = self.conn.lock().unwrap();
+            let mut all_edges_stmt = conn.prepare(
+                r#"
+                WITH RECURSIVE crate_map(mod_id, crate_id) AS (
+                    SELECT id, id FROM modules
+                    UNION ALL
+                    SELECT m.id, cm.crate_id
+                    FROM modules m
+                    JOIN crate_map cm ON m.parent_id = cm.mod_id
+                )
+                SELECT cm1.crate_id, cm2.crate_id, c1.symbol_name, c1.chunk_kind, e.target_query, c2.chunk_kind, e.line_number, e.edge_kind
+                FROM edges e
+                JOIN chunks c1 ON e.source_hash = c1.content_hash
+                JOIN crate_map cm1 ON c1.module_id = cm1.mod_id
+                JOIN chunks c2 ON (e.target_query = c2.symbol_name OR e.target_query LIKE c2.symbol_name || '::%')
+                JOIN crate_map cm2 ON c2.module_id = cm2.mod_id
+                WHERE cm1.crate_id != cm2.crate_id
+                "#
+            )?;
+            
+            let all_edges_rows = all_edges_stmt.query_map([], |row| {
+                let src_crate: String = row.get(0)?;
+                let tgt_crate: String = row.get(1)?;
+                let src_sym: Option<String> = row.get(2)?;
+                let src_kind_str: Option<String> = row.get(3)?;
+                let tgt_sym: String = row.get(4)?;
+                let tgt_kind_str: Option<String> = row.get(5)?;
+                let line: Option<i64> = row.get(6)?;
+                let kind_str: String = row.get(7)?;
+                
+                let kind = match kind_str.as_str() {
+                    "calls" | "Calls" => EdgeKind::Calls,
+                    "imports" | "Imports" => EdgeKind::Imports,
+                    _ => EdgeKind::References,
+                };
+
+                let detail = crate::service::models::ModuleEdgeDetail {
+                    source_symbol: src_sym.unwrap_or_else(|| "unknown".to_string()),
+                    source_kind: src_kind_str.map(|s| crate::chunk::ChunkKind::from_str(&s)),
+                    target_symbol: tgt_sym,
+                    target_kind: tgt_kind_str.map(|s| crate::chunk::ChunkKind::from_str(&s)),
+                    line_number: line.map(|l| l as usize),
+                    kind,
+                };
+                Ok(((src_crate, tgt_crate), detail))
+            })?;
+
+            for row in all_edges_rows {
+                if let Ok((pair, detail)) = row {
+                    edge_map.entry(pair).or_default().push(detail);
+                }
+            }
+        }
+
         for module in target_modules {
             let mut dependencies = Vec::new();
 
@@ -1025,8 +1082,10 @@ impl ModuleStore for SqliteStorage {
                     "#
                 } else {
                     r#"
-                    SELECT target_module, edge_count 
-                    FROM module_edges 
+                    SELECT 
+                        target_module as target_id,
+                        edge_count
+                    FROM module_edges
                     WHERE source_module = ?1
                     ORDER BY edge_count DESC
                     "#
@@ -1037,59 +1096,12 @@ impl ModuleStore for SqliteStorage {
                     Ok((row.get::<_, String>(0)?, row.get::<_, usize>(1)?))
                 })?;
                 
-                let mut results = Vec::new();
-                for row in rows {
-                    if let Ok(res) = row {
-                        results.push(res);
-                    }
-                }
-                results
+                rows.filter_map(|r| r.ok()).collect()
             };
 
             for (target_id, count) in deps_raw {
                 let edges = if include_edges {
-                    let conn = self.conn.lock().unwrap();
-                    let mut edge_stmt = conn.prepare(
-                        r#"
-                        WITH RECURSIVE crate_map(mod_id, crate_id) AS (
-                            SELECT id, id FROM modules
-                            UNION ALL
-                            SELECT m.id, cm.crate_id
-                            FROM modules m
-                            JOIN crate_map cm ON m.parent_id = cm.mod_id
-                        )
-                        SELECT c1.symbol_name, e.target_query, e.line_number, e.edge_kind
-                        FROM edges e
-                        JOIN chunks c1 ON e.source_hash = c1.content_hash
-                        JOIN crate_map cm1 ON c1.module_id = cm1.mod_id
-                        -- Target matching: either by symbol_name or by ID prefix
-                        JOIN chunks c2 ON (e.target_query = c2.symbol_name OR e.target_query LIKE c2.symbol_name || '::%')
-                        JOIN crate_map cm2 ON c2.module_id = cm2.mod_id
-                        WHERE cm1.crate_id = ?1 AND cm2.crate_id = ?2
-                        "#
-                    )?;
-                    let edges_rows = edge_stmt.query_map(params![module.id, target_id], |row| {
-                        let kind_str: String = row.get(3)?;
-                        let kind = match kind_str.as_str() {
-                            "calls" | "Calls" => EdgeKind::Calls,
-                            "imports" | "Imports" => EdgeKind::Imports,
-                            _ => EdgeKind::References,
-                        };
-                        Ok(crate::service::models::ModuleEdgeDetail {
-                            source_symbol: row.get::<_, Option<String>>(0)?.unwrap_or_else(|| "unknown".to_string()),
-                            target_symbol: row.get(1)?,
-                            line_number: row.get::<_, Option<i64>>(2)?.map(|l| l as usize),
-                            kind,
-                        })
-                    })?;
-
-                    let mut e_list = Vec::new();
-                    for e_row in edges_rows {
-                        if let Ok(e) = e_row {
-                            e_list.push(e);
-                        }
-                    }
-                    Some(e_list)
+                    edge_map.get(&(module.id.clone(), target_id.clone())).cloned()
                 } else {
                     None
                 };

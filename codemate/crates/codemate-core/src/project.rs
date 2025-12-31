@@ -323,9 +323,7 @@ mod tests {
     #[test]
     fn test_detect_rust_crate() {
         let temp_dir = TempDir::new().unwrap();
-        let crate_dir = temp_dir.path().join("my_crate");
-        fs::create_dir(&crate_dir).unwrap();
-        fs::write(crate_dir.join("Cargo.toml"), r#"
+        fs::write(temp_dir.path().join("Cargo.toml"), r#"
 [package]
 name = "my_crate"
 version = "0.1.0"
@@ -334,6 +332,7 @@ version = "0.1.0"
         let mut detector = ProjectDetector::new(temp_dir.path());
         let modules = detector.detect_modules();
 
+        // Should have 1 module because it's at the root
         assert_eq!(modules.len(), 1);
         assert_eq!(modules[0].name, "my_crate");
         assert_eq!(modules[0].project_type, ProjectType::Crate);

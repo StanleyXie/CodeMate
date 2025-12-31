@@ -19,7 +19,21 @@ pkill -9 codemate-server || true
 SERVER_PID=$!
 
 echo "Starting CodeMate server (PID: $SERVER_PID)..."
-sleep 5
+echo "Starting CodeMate server (PID: $SERVER_PID)..."
+# Poll health endpoint with timeout
+TIMEOUT=10
+COUNT=0
+until curl -s $BASE_URL/health > /dev/null || [ $COUNT -eq $TIMEOUT ]; do
+    sleep 1
+    COUNT=$((COUNT + 1))
+    echo "Waiting for server ($COUNT)..."
+done
+
+if [ $COUNT -eq $TIMEOUT ]; then
+    echo "✗ Server failed to start within ${TIMEOUT}s."
+    kill $SERVER_PID
+    exit 1
+fi
 
 # Run tests
 echo "Checking health..."
@@ -39,8 +53,9 @@ else
     exit 1
 fi
 
-echo "Waiting for indexing (10s)..."
-sleep 10
+echo "Waiting for indexing (2s)..."
+# Indexing is extremely fast for this small project with our new optimizations
+sleep 2
 
 echo -n "Testing search... "
 resp=$(curl -s -X POST $BASE_URL/api/v1/search -H "Content-Type: application/json" -d '{"query": "AppState"}')

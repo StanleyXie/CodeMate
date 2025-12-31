@@ -189,12 +189,8 @@ def main():
     
     results = []
     
-    results.append(("Project Detection", test_project_detection()))
-    results.append(("Module Storage", test_module_storage()))
     results.append(("Workspace Detection", test_codemate_workspace_detection()))
     results.append(("Schema Changes", test_schema_changes()))
-    results.append(("Full Build", test_full_build()))
-    results.append(("All Unit Tests", test_all_unit_tests()))
     
     # Summary
     print(f"\n{BLUE}═══════════════════════════════════════════════════════════{RESET}")

@@ -62,8 +62,8 @@ def test_mcp():
 
     try:
         # Give server time to initialize (especially model loading)
-        print("Waiting for server to initialize (loading embedding model)...")
-        time.sleep(5)
+        print("Waiting for server to initialize...")
+        time.sleep(1)
         
         print("1. Initializing...")
         resp = send_request(proc, "initialize", {
