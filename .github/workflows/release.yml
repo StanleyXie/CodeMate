@@ -37,9 +37,13 @@ jobs:
           workspaces: codemate -> target
           key: ${{ matrix.target }}
 
-      - name: Build Release
+      - name: Build CLI (Lean)
         working-directory: codemate
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --target ${{ matrix.target }} -p codemate-cli --no-default-features
+
+      - name: Build Server (Full)
+        working-directory: codemate
+        run: cargo build --release --target ${{ matrix.target }} -p codemate-server
 
       - name: Package Artifacts
         shell: bash

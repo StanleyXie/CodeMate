@@ -13,7 +13,7 @@ path = "src/main.rs"
 [dependencies]
 codemate-core.workspace = true
 codemate-parser.workspace = true
-codemate-embeddings.workspace = true
+codemate-embeddings = { workspace = true, optional = true }
 codemate-git.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
@@ -24,4 +24,8 @@ tracing-subscriber.workspace = true
 walkdir = "2.4"
 chrono = "0.4"
 async-recursion = "1.1"
+
+[features]
+default = []
+embeddings = ["dep:codemate-embeddings"]
 

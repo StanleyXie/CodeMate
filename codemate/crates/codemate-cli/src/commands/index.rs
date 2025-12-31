@@ -1,8 +1,11 @@
 //! Index command implementation.
 
 use anyhow::Result;
-use codemate_core::storage::{ChunkStore, Embedder, GraphStore, LocationStore, ModuleStore, SqliteStorage, VectorStore};
+use codemate_core::storage::{ChunkStore, GraphStore, LocationStore, ModuleStore, SqliteStorage};
+#[cfg(feature = "embeddings")]
+use codemate_core::storage::{Embedder, VectorStore};
 use codemate_core::{ChunkLocation, ProjectDetector};
+#[cfg(feature = "embeddings")]
 use codemate_embeddings::EmbeddingGenerator;
 use codemate_parser::ChunkExtractor;
 use colored::Colorize;
@@ -54,8 +57,11 @@ async fn run_simple(path: &PathBuf, database: &PathBuf) -> Result<()> {
     storage.set_foreign_keys(true)?;
     
     // Initialize embeddings (lazy - created on first use)
-    println!("{} Loading embedding model...", "→".blue());
-    let embedder = EmbeddingGenerator::new()?;
+    #[cfg(feature = "embeddings")]
+    let embedder = {
+        println!("{} Loading embedding model...", "→".blue());
+        EmbeddingGenerator::new()?
+    };
 
     // Collect files to index
     let mut total_files = 0;
@@ -122,19 +128,22 @@ async fn run_simple(path: &PathBuf, database: &PathBuf) -> Result<()> {
             ChunkStore::put(&storage, &chunk).await?;
             
             // Generate and store embedding
-            let embedding_text = format!(
-                "{} {}\n{}",
-                chunk.symbol_name.as_deref().unwrap_or(""),
-                chunk.docstring.as_deref().unwrap_or(""),
-                &chunk.content
-            );
-            
-            match embedder.embed(&embedding_text) {
-                Ok(embedding) => {
-                    VectorStore::put(&storage, &chunk.content_hash, &embedding).await?;
-                }
-                Err(e) => {
-                    tracing::warn!("Error generating embedding: {}", e);
+            #[cfg(feature = "embeddings")]
+            {
+                let embedding_text = format!(
+                    "{} {}\n{}",
+                    chunk.symbol_name.as_deref().unwrap_or(""),
+                    chunk.docstring.as_deref().unwrap_or(""),
+                    &chunk.content
+                );
+                
+                match embedder.embed(&embedding_text) {
+                    Ok(embedding) => {
+                        VectorStore::put(&storage, &chunk.content_hash, &embedding).await?;
+                    }
+                    Err(e) => {
+                        tracing::warn!("Error generating embedding: {}", e);
+                    }
                 }
             }
 
@@ -231,8 +240,11 @@ async fn run_git_aware(path: &PathBuf, database: &PathBuf) -> Result<()> {
     println!("  Stored {} modules", modules.len());
 
     // Initialize embeddings
-    println!("{} Loading embedding model...", "→".blue());
-    let embedder = EmbeddingGenerator::new()?;
+    #[cfg(feature = "embeddings")]
+    let embedder = {
+        println!("{} Loading embedding model...", "→".blue());
+        EmbeddingGenerator::new()?
+    };
 
     let mut total_files = 0;
     let mut total_chunks = 0;
@@ -299,15 +311,18 @@ async fn run_git_aware(path: &PathBuf, database: &PathBuf) -> Result<()> {
             ChunkStore::put(&storage, &chunk).await?;
             
             // Generate and store embedding
-            let embedding_text = format!(
-                "{} {}\n{}",
-                chunk.symbol_name.as_deref().unwrap_or(""),
-                chunk.docstring.as_deref().unwrap_or(""),
-                &chunk.content
-            );
-            
-            if let Ok(embedding) = embedder.embed(&embedding_text) {
-                VectorStore::put(&storage, &chunk.content_hash, &embedding).await?;
+            #[cfg(feature = "embeddings")]
+            {
+                let embedding_text = format!(
+                    "{} {}\n{}",
+                    chunk.symbol_name.as_deref().unwrap_or(""),
+                    chunk.docstring.as_deref().unwrap_or(""),
+                    &chunk.content
+                );
+                
+                if let Ok(embedding) = embedder.embed(&embedding_text) {
+                    VectorStore::put(&storage, &chunk.content_hash, &embedding).await?;
+                }
             }
 
             // Create location with git info
